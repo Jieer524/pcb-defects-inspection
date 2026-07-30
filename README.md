@@ -1,53 +1,68 @@
-# PCB Defect Inspection Using Image Processing Techniques
+# PCB Defect Inspection Using Classical Image Processing
 
 ## Project Overview
 
-This project investigates and compares four image processing techniques for automated bare printed circuit board (PCB) defect inspection:
+This project develops and compares four classical image processing techniques for bare printed circuit board (PCB) defect inspection:
 
 1. Otsu's Thresholding
 2. Canny Edge Detection
 3. Template Matching
 4. ORB Feature Matching
 
-The system focuses on six common bare-PCB fabrication defects:
+The system compares a defect-free PCB template with a defective PCB image to identify structural differences. All four techniques will be evaluated under the same experimental conditions using accuracy, precision, recall, F1-score, localisation performance, and processing time.
 
+The six defect categories are:
+
+- Missing hole
+- Mouse bite
 - Open circuit
 - Short circuit
 - Spur
 - Spurious copper
-- Missing hole
-- Mouse bite
 
-All techniques will be implemented and evaluated under the same experimental conditions. The comparison will consider detection performance, localisation quality, robustness, and processing time. Based on the results, an enhanced or hybrid method may be developed to improve overall inspection performance.
+The final stage may combine the strongest techniques into an enhanced or hybrid method and integrate the system into a Streamlit dashboard.
 
-## Project Objectives
+## Dataset
 
-- Investigate contemporary image processing techniques for PCB defect inspection.
-- Implement four different techniques using a common dataset and evaluation procedure.
-- Compare the accuracy, robustness, localisation capability, and computational efficiency of each technique.
-- Identify the strengths and limitations of each technique.
-- Develop an enhanced or hybrid method based on the experimental findings.
-- Integrate the final methods into a simple Streamlit dashboard for live testing.
+Dataset source:
 
-## Techniques
+```text
+https://www.kaggle.com/datasets/akhatova/pcb-defects/data
+```
 
-### 1. Otsu's Thresholding
+The dataset contains normally aligned images, rotated images, XML annotations, and ten defect-free PCB templates. For the first comparison, use only the normally aligned images. Use the rotated subset later for robustness testing.
 
-Otsu's method automatically selects a global threshold to separate foreground and background pixels. In this project, it may be applied to the difference between a defect-free reference image and a test PCB image to produce a binary defect mask.
+Store the dataset at:
 
-### 2. Canny Edge Detection
+```text
+C:\...\pcb-defects-inspection\data\raw\PCB_DATASET
+```
 
-Canny edge detection extracts the structural boundaries of PCB tracks and holes. Differences between the reference and test edge maps can be analysed to identify structural defects.
+Expected structure:
 
-### 3. Template Matching
+```text
+PCB_DATASET/
+├── Annotations/
+│   ├── Missing_hole/
+│   ├── Mouse_bite/
+│   ├── Open_circuit/
+│   ├── Short/
+│   ├── Spur/
+│   └── Spurious_copper/
+├── Images/
+│   ├── Missing_hole/
+│   ├── Mouse_bite/
+│   ├── Open_circuit/
+│   ├── Short/
+│   ├── Spur/
+│   └── Spurious_copper/
+├── PCB_USED/
+└── rotation/
+```
 
-Template matching compares the visual similarity between a test PCB image and a corresponding defect-free reference image or image region.
+Do not upload the dataset to GitHub.
 
-### 4. ORB Feature Matching
-
-ORB, or Oriented FAST and Rotated BRIEF, detects keypoints and generates binary descriptors. Feature correspondences between reference and test images can be analysed to identify structural differences and support image alignment.
-
-## Recommended Project Structure
+## Project Structure
 
 ```text
 pcb-defects-inspection/
@@ -63,7 +78,7 @@ pcb-defects-inspection/
 │   ├── template_matching.py
 │   └── orb.py
 ├── notebooks/
-│   ├── 01_dataset_exploration.ipynb
+│   ├── 01_dataset_exploration_and_preprocessing.ipynb
 │   ├── 02_otsu.ipynb
 │   ├── 03_canny.ipynb
 │   ├── 04_template_matching.ipynb
@@ -71,8 +86,8 @@ pcb-defects-inspection/
 │   └── 06_comparison.ipynb
 ├── data/
 │   ├── raw/
-│   ├── processed/
-│   └── annotations/
+│   │   └── PCB_DATASET/
+│   └── processed/
 ├── outputs/
 │   ├── masks/
 │   ├── visualisations/
@@ -80,212 +95,87 @@ pcb-defects-inspection/
 └── tests/
 ```
 
-The dataset and generated outputs should not be committed to GitHub.
-
-# Setup Guide
+# Team Setup
 
 ## 1. Clone the Repository
 
-```bash
+```powershell
 git clone https://github.com/<username>/pcb-defects-inspection.git
 cd pcb-defects-inspection
-```
-
-Replace `<username>` with the GitHub username of the repository owner.
-
-Open the project in VS Code:
-
-```bash
 code .
 ```
 
-## 2. Create a Virtual Environment
-
-To avoid Windows path-length problems, create the virtual environment outside the repository.
+## 2. Create and Activate the Virtual Environment
 
 ```powershell
 python -m venv C:\venvs\pcb-env
-```
-
-Activate it:
-
-```powershell
 C:\venvs\pcb-env\Scripts\Activate.ps1
 ```
 
-The terminal should display:
-
-```text
-(pcb-env)
-```
-
-If PowerShell blocks the activation command, run:
+If PowerShell blocks activation:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+C:\venvs\pcb-env\Scripts\Activate.ps1
 ```
 
-Then activate the environment again.
-
-## 3. Upgrade Installation Tools
+## 3. Install Dependencies
 
 ```powershell
 python -m pip install --upgrade pip setuptools wheel
-```
-
-## 4. Install Project Dependencies
-
-If `requirements.txt` is available:
-
-```powershell
 python -m pip install -r requirements.txt
 ```
 
-Otherwise install the required packages manually:
+If `requirements.txt` is unavailable:
 
 ```powershell
 python -m pip install numpy pandas matplotlib opencv-python scikit-image scikit-learn pillow pyyaml
 python -m pip install notebook ipykernel streamlit pytest
 ```
 
-Verify the installation:
+Verify:
 
 ```powershell
 python -m pip check
 ```
 
-## 5. Register the Jupyter Kernel
+## 4. Register the Jupyter Kernel
 
 ```powershell
 C:\venvs\pcb-env\Scripts\python.exe -m ipykernel install --user --name pcb-env --display-name "Python (PCB Defect)"
 ```
 
-Check that the kernel is registered:
+Check registration:
 
 ```powershell
 C:\venvs\pcb-env\Scripts\python.exe -m jupyter kernelspec list
 ```
 
-The output should include:
+## 5. Select the Interpreter in VS Code
 
-```text
-pcb-env
-```
-
-## 6. Select the Python Interpreter in VS Code
-
-In VS Code:
-
-1. Press `Ctrl + Shift + P`.
-2. Select `Python: Select Interpreter`.
-3. Choose:
+Select:
 
 ```text
 C:\venvs\pcb-env\Scripts\python.exe
 ```
 
-For a notebook:
-
-1. Open the `.ipynb` file.
-2. Click `Select Kernel`.
-3. Choose `Jupyter Kernel`.
-4. Select `Python (PCB Defect)`.
-
-To verify the selected interpreter, run:
-
-```python
-import sys
-print(sys.executable)
-```
-
-Expected output:
+For notebooks, select the kernel:
 
 ```text
-C:\venvs\pcb-env\Scripts\python.exe
+Python (PCB Defect)
 ```
 
-## 7. Test the Environment
+# Dataset Exploration and Shared Preprocessing
 
-Create or open `notebooks/01_dataset_exploration.ipynb` and run:
-
-If no error appears, the environment is ready.
-
-## 8. Dataset Setup
-
-The project is intended to use a paired bare-PCB image dataset such as DeepPCB.
-
-Each sample should contain:
-
-- a defect-free reference image;
-- a defective test image;
-- ground-truth annotations;
-- a defect category.
-
-Place local dataset files under:
+Use:
 
 ```text
-data/raw/
+notebooks/01_dataset_exploration_and_preprocessing.ipynb
 ```
 
-Do not commit the full dataset to GitHub.
+# Evaluation Metrics
 
-Before implementation, verify image pairing, image resolution, annotation format, defect class names, number of samples per class, and whether the images are binary, grayscale, or colour.
-
-## 9. Notebook Workflow
-
-Each member should use a separate notebook for their assigned technique:
-
-```text
-01_dataset_exploration.ipynb
-02_otsu.ipynb
-03_canny.ipynb
-04_template_matching.ipynb
-05_orb.ipynb
-06_comparison.ipynb
-```
-
-Each algorithm notebook should follow the same structure:
-
-```text
-Import libraries
-→ Load reference and test images
-→ Apply shared preprocessing
-→ Run the selected technique
-→ Generate mask, edge map, similarity map, or feature matches
-→ Produce defect prediction
-→ Measure processing time
-→ Save results
-→ Calculate evaluation metrics
-```
-
-## 10. Shared Output Format
-
-All techniques should return results in a consistent format:
-
-```python
-{
-    "image_id": "0001",
-    "algorithm": "Otsu's Thresholding",
-    "is_defective": True,
-    "score": 0.87,
-    "mask": defect_mask,
-    "bounding_boxes": [
-        {
-            "x": 120,
-            "y": 85,
-            "width": 30,
-            "height": 22
-        }
-    ],
-    "processing_time_ms": 18.4
-}
-```
-
-## 11. Evaluation Metrics
-
-Use the same metrics for all four techniques.
-
-### Detection Metrics
+Detection metrics:
 
 - Accuracy
 - Precision
@@ -294,53 +184,43 @@ Use the same metrics for all four techniques.
 - False-positive rate
 - False-negative rate
 
-### Localisation Metrics
+Localisation metrics:
 
 - Intersection over Union
-- Jaccard similarity
 - Dice coefficient
-- Boundary displacement error, where suitable
+- Bounding-box overlap
+- Detection rate per defect instance
 
-### Computational Metrics
+Computational metrics:
 
 - Processing time per image
 - Mean processing time
 - Standard deviation
 - Frames per second
 
-### Robustness Tests
+Robustness tests:
 
+- Rotation
+- Translation
 - Gaussian noise
 - Salt-and-pepper noise
 - Brightness variation
 - Uneven illumination
-- Translation
-- Rotation
 - Scale variation
 
-## 12. Streamlit Dashboard
+# Streamlit Dashboard
 
-The final dashboard will allow the user to upload a defect-free reference PCB image, upload a test PCB image, select an image processing technique, run the selected technique, and display the prediction, defect mask or matched features, detected regions, processing time, and algorithm score.
+The final dashboard may allow users to upload a reference image and test image, select an algorithm, inspect predicted masks and boxes, and view processing time and evaluation results.
 
-Run the dashboard from the project root:
+Run it with:
 
 ```powershell
 streamlit run app.py
 ```
 
-The default local address is usually:
-
-```text
-http://localhost:8501
-```
-
-The dashboard should import reusable functions from the `algorithms/` folder rather than executing notebook cells directly.
-
 # Git Workflow
 
-## Create a Feature Branch
-
-Each member should work on a separate branch:
+Create a feature branch:
 
 ```powershell
 git checkout -b feature/otsu
@@ -357,46 +237,26 @@ feature/evaluation
 feature/dashboard
 ```
 
-Push the branch:
-
-```powershell
-git push -u origin feature/otsu
-```
-
-## Commit Changes
+Commit changes:
 
 ```powershell
 git add .
-git commit -m "Implement Otsu thresholding technique"
+git commit -m "Add dataset exploration and shared preprocessing"
 git push
 ```
 
-Use meaningful commit messages such as:
+# Important Notes
 
-```text
-Add dataset exploration notebook
-Implement Otsu thresholding
-Add Canny edge comparison
-Implement template matching
-Add ORB feature matching
-Add evaluation metrics
-Create Streamlit dashboard
-Fix incorrect image dimensions
-```
-
-Avoid vague messages such as `update`, `fix`, `done`, or `final`.
-
-# Notes
-
+- Do not commit the dataset.
 - Do not commit the virtual environment.
-- Do not commit the full PCB dataset.
-- Do not commit generated masks or large output folders.
-- Use the same dataset split and evaluation rules for all techniques.
-- Record parameter settings for every experiment.
-- Record hardware and software versions for reproducibility.
-- Keep reusable code in the `algorithms/` folder.
-- Use notebooks for experimentation, visualisation, and analysis.
-- Use `app.py` for live dashboard execution.
+- Do not commit large generated outputs.
+- Use the same shared preprocessing for all four algorithms.
+- Keep algorithm-specific enhancements out of the baseline preprocessing.
+- Keep experiments and visualisations in notebooks.
+- Move reusable functions into `algorithms/`.
+- Record all parameters and processing times.
+- Verify that each defective image maps to the correct PCB template.
+- Use rotated images only after the aligned baseline works.
 
 ## Licence
 
