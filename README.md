@@ -82,7 +82,7 @@ pcb-defects-inspection/
 
 The dataset and generated outputs should not be committed to GitHub.
 
-# Team Setup Guide
+# Setup Guide
 
 ## 1. Clone the Repository
 
@@ -207,21 +207,6 @@ C:\venvs\pcb-env\Scripts\python.exe
 ## 7. Test the Environment
 
 Create or open `notebooks/01_dataset_exploration.ipynb` and run:
-
-```python
-import cv2
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-import sklearn
-import skimage
-import streamlit
-
-print("Environment setup successful")
-print("OpenCV:", cv2.__version__)
-print("NumPy:", np.__version__)
-print("Pandas:", pd.__version__)
-```
 
 If no error appears, the environment is ready.
 
@@ -400,40 +385,6 @@ Fix incorrect image dimensions
 ```
 
 Avoid vague messages such as `update`, `fix`, `done`, or `final`.
-
-## Pull the Latest Main Branch
-
-Before starting new work:
-
-```powershell
-git checkout main
-git pull origin main
-git checkout <your-feature-branch>
-git merge main
-```
-
-# Current Development Plan
-
-- [x] Create GitHub repository
-- [x] Add `.gitignore`
-- [x] Create project structure
-- [x] Create Python virtual environment
-- [x] Install required libraries
-- [x] Register Jupyter kernel
-- [ ] Add and inspect the PCB dataset
-- [ ] Create dataset exploration notebook
-- [ ] Implement shared image-loading functions
-- [ ] Implement shared preprocessing
-- [ ] Implement Otsu's thresholding
-- [ ] Implement Canny edge detection
-- [ ] Implement template matching
-- [ ] Implement ORB feature matching
-- [ ] Implement common evaluation metrics
-- [ ] Run the four-technique comparison
-- [ ] Conduct robustness testing
-- [ ] Develop an enhanced or hybrid method
-- [ ] Integrate the techniques into Streamlit
-- [ ] Generate final tables, figures, and discussion
 
 # Notes
 
