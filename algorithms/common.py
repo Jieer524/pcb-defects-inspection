@@ -18,47 +18,45 @@ def load_image(path: str | Path) -> np.ndarray:
     return image
 
 
-def preprocess_pair(
-    reference: np.ndarray,
-    defective: np.ndarray,
-    blur_kernel: tuple[int, int] = (5, 5),
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def validate_pair(reference: np.ndarray, defective: np.ndarray) -> None:
+    """Validate a reference/defective pair without altering either image."""
     if reference is None or defective is None:
         raise ValueError("Reference and defective images are required.")
 
-    height, width = reference.shape[:2]
+    if reference.ndim not in (2, 3) or defective.ndim not in (2, 3):
+        raise ValueError("Images must be grayscale or color arrays.")
 
-    defective_resized = cv2.resize(
-        defective,
-        (width, height),
-        interpolation=cv2.INTER_AREA
-    )
+    reference_size = reference.shape[:2]
+    defective_size = defective.shape[:2]
+    if reference_size != defective_size:
+        raise ValueError(
+            "Reference and defective image dimensions must match; "
+            f"got {reference_size} and {defective_size}. "
+            "Automatic resizing is disabled because it can invalidate XML coordinates."
+        )
 
-    reference_gray = cv2.cvtColor(
-        reference,
-        cv2.COLOR_BGR2GRAY
-    )
 
-    defective_gray = cv2.cvtColor(
-        defective_resized,
-        cv2.COLOR_BGR2GRAY
-    )
+def to_grayscale(image: np.ndarray) -> np.ndarray:
+    """Return an 8-bit grayscale image without denoising or enhancement."""
+    if image is None:
+        raise ValueError("An image is required.")
+    if image.ndim == 2:
+        return image.copy()
+    if image.ndim == 3 and image.shape[2] == 3:
+        return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    if image.ndim == 3 and image.shape[2] == 4:
+        return cv2.cvtColor(image, cv2.COLOR_BGRA2GRAY)
+    raise ValueError(f"Unsupported image shape: {image.shape}")
 
-    reference_blur = cv2.GaussianBlur(
-        reference_gray,
-        blur_kernel,
-        0
-    )
 
-    defective_blur = cv2.GaussianBlur(
-        defective_gray,
-        blur_kernel,
-        0
-    )
+def preprocess_pair(
+    reference: np.ndarray,
+    defective: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Apply only the neutral preprocessing shared by all raw algorithms.
 
-    difference = cv2.absdiff(
-        reference_blur,
-        defective_blur
-    )
-
-    return reference_blur, defective_blur, difference
+    Algorithm-specific representations such as absolute differences, edge maps,
+    similarity responses, and descriptors must be created by each algorithm.
+    """
+    validate_pair(reference, defective)
+    return to_grayscale(reference), to_grayscale(defective)
