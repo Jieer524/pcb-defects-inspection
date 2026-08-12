@@ -34,9 +34,14 @@ The dataset contains normally aligned images, rotated images, XML annotations, a
 
 Store the dataset at:
 
-```text
-C:\...\pcb-defects-inspection\data\raw\PCB_DATASET
-```
+- **macOS / Linux**:
+  ```text
+  ~/Documents/Project/pcb-defects-inspection/data/raw/PCB_DATASET
+  ```
+- **Windows**:
+  ```text
+  C:\...\pcb-defects-inspection\data\raw\PCB_DATASET
+  ```
 
 Expected structure:
 
@@ -116,13 +121,22 @@ pcb-defects-inspection/
 
 ## 1. Clone the Repository
 
-```powershell
+```bash
 git clone https://github.com/<username>/pcb-defects-inspection.git
 cd pcb-defects-inspection
 code .
 ```
 
 ## 2. Create and Activate the Virtual Environment
+
+### macOS / Linux
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
+
+### Windows (PowerShell)
 
 ```powershell
 python -m venv C:\venvs\pcb-env
@@ -137,6 +151,28 @@ C:\venvs\pcb-env\Scripts\Activate.ps1
 ```
 
 ## 3. Install Dependencies
+
+### macOS / Linux
+
+```bash
+python3 -m pip install --upgrade pip setuptools wheel
+python3 -m pip install -r requirements.txt
+```
+
+If `requirements.txt` is unavailable:
+
+```bash
+python3 -m pip install numpy pandas matplotlib opencv-python scikit-image scikit-learn pillow pyyaml
+python3 -m pip install notebook ipykernel streamlit pytest
+```
+
+Verify:
+
+```bash
+python3 -m pip check
+```
+
+### Windows (PowerShell)
 
 ```powershell
 python -m pip install --upgrade pip setuptools wheel
@@ -158,6 +194,20 @@ python -m pip check
 
 ## 4. Register the Jupyter Kernel
 
+### macOS / Linux
+
+```bash
+python3 -m ipykernel install --user --name pcb-env --display-name "Python (PCB Defect)"
+```
+
+Check registration:
+
+```bash
+python3 -m jupyter kernelspec list
+```
+
+### Windows (PowerShell)
+
 ```powershell
 C:\venvs\pcb-env\Scripts\python.exe -m ipykernel install --user --name pcb-env --display-name "Python (PCB Defect)"
 ```
@@ -170,13 +220,23 @@ C:\venvs\pcb-env\Scripts\python.exe -m jupyter kernelspec list
 
 ## 5. Select the Interpreter in VS Code
 
+### macOS / Linux
+
+Select:
+
+```text
+./venv/bin/python
+```
+
+### Windows
+
 Select:
 
 ```text
 C:\venvs\pcb-env\Scripts\python.exe
 ```
 
-For notebooks, select the kernel:
+For notebooks on both platforms, select the kernel:
 
 ```text
 Python (PCB Defect)
@@ -249,7 +309,7 @@ The final dashboard may allow users to upload a reference image and test image, 
 
 Run it with:
 
-```powershell
+```bash
 streamlit run app.py
 ```
 
@@ -257,7 +317,7 @@ streamlit run app.py
 
 Create a feature branch:
 
-```powershell
+```bash
 git checkout -b feature/otsu
 ```
 
@@ -274,7 +334,7 @@ feature/dashboard
 
 Commit changes:
 
-```powershell
+```bash
 git add .
 git commit -m "Add dataset exploration and shared preprocessing"
 git push
