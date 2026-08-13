@@ -1,0 +1,14 @@
+{
+  "matcher_type": "bf_crosscheck",
+  "spatial_distance_threshold": 15.0,
+  "hamming_threshold": 60.0,
+  "box_radius": 35,
+  "iou_threshold": 0.5,
+  "precision": 0.0010849196173192623,
+  "recall": 0.1514629948364888,
+  "f1_score": 0.002154407354363287,
+  "mean_matched_iou": 0.638963095124676,
+  "true_positives": 88,
+  "false_positives": 81024,
+  "false_negatives": 493
+}
