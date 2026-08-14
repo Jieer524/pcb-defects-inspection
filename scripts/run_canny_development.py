@@ -1,0 +1,560 @@
+"""Run raw Canny on the manifest's development split only."""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import statistics
+import sys
+from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache
+from pathlib import Path
+
+import numpy as np
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from algorithms.canny import detect_canny
+from algorithms.common import load_image
+from algorithms.evaluation import evaluate_boxes, parse_voc_boxes
+
+
+ALGORITHM_VERSION = "raw-canny-v1"
+DEVELOPMENT_COUNT = 139
+
+DEFAULT_LOW_THRESHOLD = 50
+DEFAULT_HIGH_THRESHOLD = 150
+DEFAULT_BLUR_KERNEL_SIZE = 5
+
+RESULT_FIELDS = [
+    "image_id",
+    "defect_class",
+    "split",
+    "algorithm_version",
+    "low_threshold",
+    "high_threshold",
+    "blur_kernel_size",
+    "predicted_count",
+    "ground_truth_count",
+    "true_positives",
+    "false_positives",
+    "false_negatives",
+    "precision",
+    "recall",
+    "f1_score",
+    "mean_matched_iou",
+    "iou_threshold",
+    "edge_pixel_percentage",
+    "processing_time_ms",
+    "predicted_boxes_path",
+    "ground_truth_boxes",
+    "status",
+    "error",
+]
+
+
+def load_development_rows(manifest_path: Path) -> list[dict[str, str]]:
+    """Load only the authoritative development records."""
+    with manifest_path.open(newline="", encoding="utf-8") as handle:
+        rows = [
+            row
+            for row in csv.DictReader(handle)
+            if row["split"] == "development"
+        ]
+
+    if len(rows) != DEVELOPMENT_COUNT:
+        raise ValueError(
+            f"Expected {DEVELOPMENT_COUNT} development records, "
+            f"found {len(rows)}"
+        )
+
+    return sorted(rows, key=lambda row: row["image_id"])
+
+
+def resolve_project_path(path_text: str) -> Path:
+    """Resolve manifest paths relative to the project root."""
+    path = Path(path_text)
+    return path if path.is_absolute() else PROJECT_ROOT / path
+
+
+@lru_cache(maxsize=16)
+def load_reference(path: Path) -> np.ndarray:
+    """Cache the ten read-only reference images during a dataset run."""
+    return load_image(path)
+
+
+def evaluate_record(
+    row: dict[str, str],
+    iou_threshold: float,
+    boxes_directory: Path | None = None,
+    low_threshold: int = DEFAULT_LOW_THRESHOLD,
+    high_threshold: int = DEFAULT_HIGH_THRESHOLD,
+    blur_kernel_size: int = DEFAULT_BLUR_KERNEL_SIZE,
+) -> dict[str, str | int | float]:
+    """Run Canny and evaluate one manifest record."""
+    result: dict[str, str | int | float] = {
+        "image_id": row["image_id"],
+        "defect_class": row["defect_class"],
+        "split": row["split"],
+        "algorithm_version": ALGORITHM_VERSION,
+        "status": "error",
+        "error": "",
+    }
+
+    try:
+        reference = load_reference(
+            resolve_project_path(row["reference_path"])
+        )
+        defective = load_image(
+            resolve_project_path(row["image_path"])
+        )
+        ground_truth_boxes = parse_voc_boxes(
+            resolve_project_path(row["annotation_path"])
+        )
+
+        detection = detect_canny(
+            reference,
+            defective,
+            low_threshold=low_threshold,
+            high_threshold=high_threshold,
+            blur_kernel_size=blur_kernel_size,
+        )
+
+        metrics = evaluate_boxes(
+            detection.boxes,
+            ground_truth_boxes,
+            iou_threshold=iou_threshold,
+        )
+
+        edge_pixel_percentage = (
+            float((detection.edge_map != 0).sum())
+            / detection.edge_map.size
+            * 100.0
+        )
+
+        predicted_boxes_path = ""
+
+        if boxes_directory is not None:
+            if not boxes_directory.is_absolute():
+                boxes_directory = PROJECT_ROOT / boxes_directory
+
+            boxes_directory.mkdir(parents=True, exist_ok=True)
+
+            boxes_path = (
+                boxes_directory / f"{row['image_id']}.npy"
+            )
+
+            box_dtype = np.dtype(
+                [
+                    ("xmin", "<i4"),
+                    ("ymin", "<i4"),
+                    ("xmax", "<i4"),
+                    ("ymax", "<i4"),
+                    ("contour_area", "<f4"),
+                ]
+            )
+
+            compact_boxes = np.fromiter(
+                (
+                    (
+                        box["xmin"],
+                        box["ymin"],
+                        box["xmax"],
+                        box["ymax"],
+                        box["contour_area"],
+                    )
+                    for box in detection.boxes
+                ),
+                dtype=box_dtype,
+                count=len(detection.boxes),
+            )
+
+            np.save(
+                boxes_path,
+                compact_boxes,
+                allow_pickle=False,
+            )
+
+            predicted_boxes_path = (
+                boxes_path.relative_to(PROJECT_ROOT).as_posix()
+            )
+
+        result.update(
+            {
+                "low_threshold": detection.low_threshold,
+                "high_threshold": detection.high_threshold,
+                "blur_kernel_size": detection.blur_kernel_size,
+                "predicted_count": len(detection.boxes),
+                "ground_truth_count": len(ground_truth_boxes),
+                **metrics,
+                "edge_pixel_percentage": edge_pixel_percentage,
+                "processing_time_ms": detection.processing_time_ms,
+                "predicted_boxes_path": predicted_boxes_path,
+                "ground_truth_boxes": json.dumps(
+                    ground_truth_boxes,
+                    separators=(",", ":"),
+                ),
+                "status": "success",
+            }
+        )
+
+    except Exception as error:
+        result["error"] = f"{type(error).__name__}: {error}"
+
+    return result
+
+
+def evaluate_records(
+    rows: list[dict[str, str]],
+    iou_threshold: float,
+    workers: int = 1,
+    boxes_directory: Path | None = None,
+    low_threshold: int = DEFAULT_LOW_THRESHOLD,
+    high_threshold: int = DEFAULT_HIGH_THRESHOLD,
+    blur_kernel_size: int = DEFAULT_BLUR_KERNEL_SIZE,
+) -> list[dict[str, str | int | float]]:
+    """Evaluate independent records while preserving manifest order."""
+    if workers < 1:
+        raise ValueError("workers must be at least 1")
+
+    if workers == 1:
+        results = []
+
+        for index, row in enumerate(rows, start=1):
+            results.append(
+                evaluate_record(
+                    row,
+                    iou_threshold,
+                    boxes_directory,
+                    low_threshold,
+                    high_threshold,
+                    blur_kernel_size,
+                )
+            )
+
+            if index % 10 == 0 or index == len(rows):
+                print(
+                    f"Processed {index}/{len(rows)}",
+                    flush=True,
+                )
+
+        return results
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        return list(
+            executor.map(
+                lambda row: evaluate_record(
+                    row,
+                    iou_threshold,
+                    boxes_directory,
+                    low_threshold,
+                    high_threshold,
+                    blur_kernel_size,
+                ),
+                rows,
+            )
+        )
+
+
+def summarise(
+    results: list[dict[str, str | int | float]],
+    iou_threshold: float,
+    low_threshold: int = DEFAULT_LOW_THRESHOLD,
+    high_threshold: int = DEFAULT_HIGH_THRESHOLD,
+    blur_kernel_size: int = DEFAULT_BLUR_KERNEL_SIZE,
+) -> dict[str, object]:
+    """Create overall, class-level, and runtime summaries."""
+    successful = [
+        result
+        for result in results
+        if result["status"] == "success"
+    ]
+
+    runtimes = [
+        float(result["processing_time_ms"])
+        for result in successful
+    ]
+
+    def aggregate_metrics(
+        rows: list[dict[str, str | int | float]]
+    ) -> dict[str, float | int]:
+        true_positives = sum(
+            int(row["true_positives"]) for row in rows
+        )
+        false_positives = sum(
+            int(row["false_positives"]) for row in rows
+        )
+        false_negatives = sum(
+            int(row["false_negatives"]) for row in rows
+        )
+
+        precision = (
+            true_positives
+            / (true_positives + false_positives)
+            if true_positives + false_positives
+            else 0.0
+        )
+
+        recall = (
+            true_positives
+            / (true_positives + false_negatives)
+            if true_positives + false_negatives
+            else 0.0
+        )
+
+        return {
+            "images": len(rows),
+            "true_positives": true_positives,
+            "false_positives": false_positives,
+            "false_negatives": false_negatives,
+            "precision": precision,
+            "recall": recall,
+            "f1_score": (
+                2.0 * precision * recall
+                / (precision + recall)
+                if precision + recall
+                else 0.0
+            ),
+            "mean_image_iou": (
+                statistics.fmean(
+                    float(row["mean_matched_iou"])
+                    for row in rows
+                )
+                if rows
+                else 0.0
+            ),
+        }
+
+    by_class: dict[
+        str,
+        list[dict[str, str | int | float]],
+    ] = defaultdict(list)
+
+    for result in successful:
+        by_class[str(result["defect_class"])].append(result)
+
+    return {
+        "algorithm_version": ALGORITHM_VERSION,
+        "split": "development",
+        "parameters": {
+            "low_threshold": low_threshold,
+            "high_threshold": high_threshold,
+            "blur_kernel_size": blur_kernel_size,
+        },
+        "iou_threshold": iou_threshold,
+        "predicted_boxes_format": (
+            "NumPy structured array: "
+            "xmin,ymin,xmax,ymax int32; "
+            "contour_area float32"
+        ),
+        "records": len(results),
+        "successful": len(successful),
+        "errors": len(results) - len(successful),
+        "class_distribution": dict(
+            sorted(
+                Counter(
+                    str(row["defect_class"])
+                    for row in results
+                ).items()
+            )
+        ),
+        "overall_box_metrics": aggregate_metrics(successful),
+        "box_metrics_by_class": {
+            defect_class: aggregate_metrics(class_rows)
+            for defect_class, class_rows
+            in sorted(by_class.items())
+        },
+        "runtime_ms": {
+            "mean": (
+                statistics.fmean(runtimes)
+                if runtimes
+                else 0.0
+            ),
+            "standard_deviation": (
+                statistics.pstdev(runtimes)
+                if runtimes
+                else 0.0
+            ),
+            "minimum": (
+                min(runtimes)
+                if runtimes
+                else 0.0
+            ),
+            "maximum": (
+                max(runtimes)
+                if runtimes
+                else 0.0
+            ),
+            "frames_per_second": (
+                1000.0 / statistics.fmean(runtimes)
+                if runtimes
+                and statistics.fmean(runtimes)
+                else 0.0
+            ),
+        },
+    }
+
+
+def write_results(
+    results: list[dict[str, str | int | float]],
+    output_path: Path,
+) -> None:
+    """Write per-image results to CSV."""
+    output_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    with output_path.open(
+        "w",
+        newline="",
+        encoding="utf-8",
+    ) as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=RESULT_FIELDS,
+            lineterminator="\n",
+        )
+
+        writer.writeheader()
+        writer.writerows(results)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        default=(
+            PROJECT_ROOT
+            / "data"
+            / "dataset_split.csv"
+        ),
+    )
+
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=(
+            PROJECT_ROOT
+            / "outputs"
+            / "metrics"
+            / "canny_development.csv"
+        ),
+    )
+
+    parser.add_argument(
+        "--summary",
+        type=Path,
+        default=(
+            PROJECT_ROOT
+            / "outputs"
+            / "metrics"
+            / "canny_development_summary.json"
+        ),
+    )
+
+    parser.add_argument(
+        "--iou-threshold",
+        type=float,
+        default=0.5,
+        help=(
+            "Provisional development diagnostic; "
+            "freeze the final rule after validation."
+        ),
+    )
+
+    parser.add_argument(
+        "--low-threshold",
+        type=int,
+        default=DEFAULT_LOW_THRESHOLD,
+    )
+
+    parser.add_argument(
+        "--high-threshold",
+        type=int,
+        default=DEFAULT_HIGH_THRESHOLD,
+    )
+
+    parser.add_argument(
+        "--blur-kernel-size",
+        type=int,
+        default=DEFAULT_BLUR_KERNEL_SIZE,
+    )
+
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+    )
+
+    args = parser.parse_args()
+
+    rows = load_development_rows(args.manifest)
+
+    boxes_directory = (
+        args.output.parent
+        / "canny_development_boxes"
+    )
+
+    results = evaluate_records(
+        rows,
+        args.iou_threshold,
+        workers=args.workers,
+        boxes_directory=boxes_directory,
+        low_threshold=args.low_threshold,
+        high_threshold=args.high_threshold,
+        blur_kernel_size=args.blur_kernel_size,
+    )
+
+    summary = summarise(
+        results,
+        args.iou_threshold,
+        low_threshold=args.low_threshold,
+        high_threshold=args.high_threshold,
+        blur_kernel_size=args.blur_kernel_size,
+    )
+
+    write_results(
+        results,
+        args.output,
+    )
+
+    args.summary.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    args.summary.write_text(
+        json.dumps(
+            summary,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    print(
+        json.dumps(
+            summary,
+            indent=2,
+            sort_keys=True,
+        )
+    )
+
+    print(f"Results: {args.output}")
+    print(f"Summary: {args.summary}")
+
+    if int(summary["errors"]):
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    main()
