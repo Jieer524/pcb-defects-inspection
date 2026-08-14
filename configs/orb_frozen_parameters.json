@@ -1,4 +1,7 @@
 {
+  "n_features": 5000,
+  "scale_factor": 1.2,
+  "n_levels": 8,
   "matcher_type": "bf_crosscheck",
   "spatial_distance_threshold": 15.0,
   "hamming_threshold": 60.0,
@@ -10,5 +13,8 @@
   "mean_matched_iou": 0.638963095124676,
   "true_positives": 88,
   "false_positives": 81024,
-  "false_negatives": 493
+  "false_negatives": 493,
+  "selection_split": "validation",
+  "algorithm": "raw_orb",
+  "selection_metric": "f1_score"
 }

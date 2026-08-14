@@ -109,6 +109,18 @@ def detect_orb(
         raise ValueError(
             f"Unsupported matcher_type '{matcher_type}'. Use 'bf_crosscheck' or 'knn_ratio'."
         )
+    if n_features <= 0:
+        raise ValueError("n_features must be positive.")
+    if scale_factor <= 1.0:
+        raise ValueError("scale_factor must be greater than 1.")
+    if n_levels <= 0:
+        raise ValueError("n_levels must be positive.")
+    if spatial_distance_threshold < 0 or hamming_threshold < 0:
+        raise ValueError("Spatial and Hamming thresholds must be non-negative.")
+    if box_radius <= 0:
+        raise ValueError("box_radius must be positive.")
+    if not 0.0 < ratio_threshold < 1.0:
+        raise ValueError("ratio_threshold must be between 0 and 1.")
 
     start_time = perf_counter()
 
@@ -194,10 +206,6 @@ def detect_orb(
                 if idx not in matched_def_indices:
                     num_unmatched += 1
                     defect_points.append((float(kp.pt[0]), float(kp.pt[1])))
-        else:
-            raise ValueError(
-                f"Unsupported matcher_type '{matcher_type}'. Use 'bf_crosscheck' or 'knn_ratio'."
-            )
     else:
         # If one image has keypoints but no descriptors could be matched
         if kp_def is not None:

@@ -1,4 +1,4 @@
-"""Raw Canny defect detection with Gaussian smoothing and no post-processing."""
+"""Raw Canny defect detection without denoising or post-processing."""
 
 from __future__ import annotations
 
@@ -9,120 +9,70 @@ import cv2
 import numpy as np
 
 from algorithms.common import preprocess_pair
+from algorithms.contours import extract_external_boxes
 
 
 @dataclass(frozen=True)
 class CannyDetection:
     """Outputs from one raw Canny comparison."""
 
-    low_threshold: int
-    high_threshold: int
-    blur_kernel_size: int
+    low_threshold: float
+    high_threshold: float
+    aperture_size: int
+    l2_gradient: bool
     reference_gray: np.ndarray
     defective_gray: np.ndarray
-    difference: np.ndarray
-    blurred_difference: np.ndarray
-    edge_map: np.ndarray
+    reference_edges: np.ndarray
+    defective_edges: np.ndarray
+    edge_difference: np.ndarray
     boxes: list[dict[str, int | float]]
     processing_time_ms: float
-
-
-def extract_raw_boxes(edge_map: np.ndarray) -> list[dict[str, int | float]]:
-    """Return one box per external edge contour without filtering or merging."""
-    if edge_map is None or edge_map.ndim != 2:
-        raise ValueError("A two-dimensional edge map is required.")
-
-    contours, _ = cv2.findContours(
-        edge_map,
-        cv2.RETR_EXTERNAL,
-        cv2.CHAIN_APPROX_SIMPLE,
-    )
-
-    boxes: list[dict[str, int | float]] = []
-
-    for contour in contours:
-        x, y, width, height = cv2.boundingRect(contour)
-
-        boxes.append(
-            {
-                "xmin": int(x),
-                "ymin": int(y),
-                "xmax": int(x + width),
-                "ymax": int(y + height),
-                "contour_area": float(cv2.contourArea(contour)),
-            }
-        )
-
-    return sorted(
-        boxes,
-        key=lambda box: (
-            int(box["ymin"]),
-            int(box["xmin"]),
-            int(box["ymax"]),
-            int(box["xmax"]),
-        ),
-    )
 
 
 def detect_canny(
     reference: np.ndarray,
     defective: np.ndarray,
-    low_threshold: int = 50,
-    high_threshold: int = 150,
-    blur_kernel_size: int = 5,
+    low_threshold: float = 50.0,
+    high_threshold: float = 150.0,
+    aperture_size: int = 3,
+    l2_gradient: bool = False,
 ) -> CannyDetection:
-    """Run the complete raw Canny pipeline on an aligned image pair.
-
-    Timing includes validation, grayscale conversion, absolute difference,
-    Gaussian smoothing, Canny edge extraction, direct contour extraction,
-    and box construction. Disk I/O is deliberately excluded so algorithm
-    timings remain comparable.
-    """
-    if blur_kernel_size < 3 or blur_kernel_size % 2 == 0:
-        raise ValueError(
-            "blur_kernel_size must be an odd integer greater than or equal to 3."
-        )
-
-    if not 0 <= low_threshold < high_threshold <= 255:
-        raise ValueError(
-            "Thresholds must satisfy "
-            "0 <= low_threshold < high_threshold <= 255."
-        )
+    """Apply Canny independently, then directly compare the two edge maps."""
+    if low_threshold < 0 or high_threshold <= low_threshold:
+        raise ValueError("Canny thresholds require 0 <= low < high.")
+    if aperture_size not in (3, 5, 7):
+        raise ValueError("Canny aperture_size must be 3, 5, or 7.")
 
     start_time = perf_counter()
-
     reference_gray, defective_gray = preprocess_pair(reference, defective)
-
-    difference = cv2.absdiff(
+    reference_edges = cv2.Canny(
         reference_gray,
-        defective_gray,
-    )
-
-    blurred_difference = cv2.GaussianBlur(
-        difference,
-        (blur_kernel_size, blur_kernel_size),
-        0,
-    )
-
-    edge_map = cv2.Canny(
-        blurred_difference,
         low_threshold,
         high_threshold,
+        apertureSize=aperture_size,
+        L2gradient=l2_gradient,
     )
-
-    boxes = extract_raw_boxes(edge_map)
-
+    defective_edges = cv2.Canny(
+        defective_gray,
+        low_threshold,
+        high_threshold,
+        apertureSize=aperture_size,
+        L2gradient=l2_gradient,
+    )
+    edge_difference = cv2.absdiff(reference_edges, defective_edges)
+    boxes = extract_external_boxes(edge_difference)
     processing_time_ms = (perf_counter() - start_time) * 1000.0
 
     return CannyDetection(
-        low_threshold=int(low_threshold),
-        high_threshold=int(high_threshold),
-        blur_kernel_size=int(blur_kernel_size),
+        low_threshold=float(low_threshold),
+        high_threshold=float(high_threshold),
+        aperture_size=aperture_size,
+        l2_gradient=l2_gradient,
         reference_gray=reference_gray,
         defective_gray=defective_gray,
-        difference=difference,
-        blurred_difference=blurred_difference,
-        edge_map=edge_map,
+        reference_edges=reference_edges,
+        defective_edges=defective_edges,
+        edge_difference=edge_difference,
         boxes=boxes,
         processing_time_ms=processing_time_ms,
     )

@@ -24,6 +24,15 @@ from algorithms.orb import detect_orb
 
 ALGORITHM_VERSION = "raw-orb-v1"
 DEVELOPMENT_COUNT = 139
+DEVELOPMENT_BASELINE = {
+    "n_features": 5000,
+    "scale_factor": 1.2,
+    "n_levels": 8,
+    "spatial_distance_threshold": 15.0,
+    "hamming_threshold": 60.0,
+    "box_radius": 35,
+    "matcher_type": "bf_crosscheck",
+}
 RESULT_FIELDS = [
     "image_id",
     "defect_class",
@@ -262,6 +271,8 @@ def summarise(
     return {
         "algorithm_version": ALGORITHM_VERSION,
         "split": "development",
+        "development_baseline": DEVELOPMENT_BASELINE,
+        "validation_frozen_config_path": "configs/orb_frozen_parameters.json",
         "iou_threshold": iou_threshold,
         "predicted_boxes_format": "NumPy structured array: xmin,ymin,xmax,ymax int32",
         "records": len(results),

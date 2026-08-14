@@ -29,7 +29,15 @@ DEVELOPMENT_COUNT = 139
 
 DEFAULT_LOW_THRESHOLD = 50
 DEFAULT_HIGH_THRESHOLD = 150
-DEFAULT_BLUR_KERNEL_SIZE = 5
+DEFAULT_APERTURE_SIZE = 3
+DEFAULT_L2_GRADIENT = False
+VALIDATION_CANDIDATE_PAIRS = [
+    (10, 30),
+    (20, 60),
+    (30, 90),
+    (50, 150),
+    (100, 200),
+]
 
 RESULT_FIELDS = [
     "image_id",
@@ -38,7 +46,8 @@ RESULT_FIELDS = [
     "algorithm_version",
     "low_threshold",
     "high_threshold",
-    "blur_kernel_size",
+    "aperture_size",
+    "l2_gradient",
     "predicted_count",
     "ground_truth_count",
     "true_positives",
@@ -49,7 +58,7 @@ RESULT_FIELDS = [
     "f1_score",
     "mean_matched_iou",
     "iou_threshold",
-    "edge_pixel_percentage",
+    "edge_difference_percentage",
     "processing_time_ms",
     "predicted_boxes_path",
     "ground_truth_boxes",
@@ -94,7 +103,8 @@ def evaluate_record(
     boxes_directory: Path | None = None,
     low_threshold: int = DEFAULT_LOW_THRESHOLD,
     high_threshold: int = DEFAULT_HIGH_THRESHOLD,
-    blur_kernel_size: int = DEFAULT_BLUR_KERNEL_SIZE,
+    aperture_size: int = DEFAULT_APERTURE_SIZE,
+    l2_gradient: bool = DEFAULT_L2_GRADIENT,
 ) -> dict[str, str | int | float]:
     """Run Canny and evaluate one manifest record."""
     result: dict[str, str | int | float] = {
@@ -122,7 +132,8 @@ def evaluate_record(
             defective,
             low_threshold=low_threshold,
             high_threshold=high_threshold,
-            blur_kernel_size=blur_kernel_size,
+            aperture_size=aperture_size,
+            l2_gradient=l2_gradient,
         )
 
         metrics = evaluate_boxes(
@@ -131,9 +142,9 @@ def evaluate_record(
             iou_threshold=iou_threshold,
         )
 
-        edge_pixel_percentage = (
-            float((detection.edge_map != 0).sum())
-            / detection.edge_map.size
+        edge_difference_percentage = (
+            float((detection.edge_difference != 0).sum())
+            / detection.edge_difference.size
             * 100.0
         )
 
@@ -188,11 +199,12 @@ def evaluate_record(
             {
                 "low_threshold": detection.low_threshold,
                 "high_threshold": detection.high_threshold,
-                "blur_kernel_size": detection.blur_kernel_size,
+                "aperture_size": detection.aperture_size,
+                "l2_gradient": detection.l2_gradient,
                 "predicted_count": len(detection.boxes),
                 "ground_truth_count": len(ground_truth_boxes),
                 **metrics,
-                "edge_pixel_percentage": edge_pixel_percentage,
+                "edge_difference_percentage": edge_difference_percentage,
                 "processing_time_ms": detection.processing_time_ms,
                 "predicted_boxes_path": predicted_boxes_path,
                 "ground_truth_boxes": json.dumps(
@@ -216,7 +228,8 @@ def evaluate_records(
     boxes_directory: Path | None = None,
     low_threshold: int = DEFAULT_LOW_THRESHOLD,
     high_threshold: int = DEFAULT_HIGH_THRESHOLD,
-    blur_kernel_size: int = DEFAULT_BLUR_KERNEL_SIZE,
+    aperture_size: int = DEFAULT_APERTURE_SIZE,
+    l2_gradient: bool = DEFAULT_L2_GRADIENT,
 ) -> list[dict[str, str | int | float]]:
     """Evaluate independent records while preserving manifest order."""
     if workers < 1:
@@ -233,7 +246,8 @@ def evaluate_records(
                     boxes_directory,
                     low_threshold,
                     high_threshold,
-                    blur_kernel_size,
+                    aperture_size,
+                    l2_gradient,
                 )
             )
 
@@ -254,7 +268,8 @@ def evaluate_records(
                     boxes_directory,
                     low_threshold,
                     high_threshold,
-                    blur_kernel_size,
+                    aperture_size,
+                    l2_gradient,
                 ),
                 rows,
             )
@@ -266,7 +281,8 @@ def summarise(
     iou_threshold: float,
     low_threshold: int = DEFAULT_LOW_THRESHOLD,
     high_threshold: int = DEFAULT_HIGH_THRESHOLD,
-    blur_kernel_size: int = DEFAULT_BLUR_KERNEL_SIZE,
+    aperture_size: int = DEFAULT_APERTURE_SIZE,
+    l2_gradient: bool = DEFAULT_L2_GRADIENT,
 ) -> dict[str, object]:
     """Create overall, class-level, and runtime summaries."""
     successful = [
@@ -341,11 +357,13 @@ def summarise(
     return {
         "algorithm_version": ALGORITHM_VERSION,
         "split": "development",
-        "parameters": {
+        "development_baseline": {
             "low_threshold": low_threshold,
             "high_threshold": high_threshold,
-            "blur_kernel_size": blur_kernel_size,
+            "aperture_size": aperture_size,
+            "l2_gradient": l2_gradient,
         },
+        "validation_candidate_threshold_pairs": VALIDATION_CANDIDATE_PAIRS,
         "iou_threshold": iou_threshold,
         "predicted_boxes_format": (
             "NumPy structured array: "
@@ -483,9 +501,9 @@ def main() -> None:
     )
 
     parser.add_argument(
-        "--blur-kernel-size",
+        "--aperture-size",
         type=int,
-        default=DEFAULT_BLUR_KERNEL_SIZE,
+        default=DEFAULT_APERTURE_SIZE,
     )
 
     parser.add_argument(
@@ -510,7 +528,8 @@ def main() -> None:
         boxes_directory=boxes_directory,
         low_threshold=args.low_threshold,
         high_threshold=args.high_threshold,
-        blur_kernel_size=args.blur_kernel_size,
+        aperture_size=args.aperture_size,
+        l2_gradient=DEFAULT_L2_GRADIENT,
     )
 
     summary = summarise(
@@ -518,7 +537,8 @@ def main() -> None:
         args.iou_threshold,
         low_threshold=args.low_threshold,
         high_threshold=args.high_threshold,
-        blur_kernel_size=args.blur_kernel_size,
+        aperture_size=args.aperture_size,
+        l2_gradient=DEFAULT_L2_GRADIENT,
     )
 
     write_results(

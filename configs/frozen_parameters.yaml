@@ -1,0 +1,36 @@
+# Frozen after development and validation. Do not edit in response to test results.
+protocol:
+  manifest: data/dataset_split.csv
+  test_images: 415
+  iou_threshold: 0.50
+  shared_preprocessing:
+    validate_equal_dimensions: true
+    grayscale: true
+    automatic_resize: false
+    gaussian_blur: false
+    morphology: false
+    detection_filtering_or_merging: false
+
+otsu:
+  method: THRESH_BINARY+THRESH_OTSU
+
+canny:
+  low_threshold: 50
+  high_threshold: 150
+  aperture_size: 3
+  l2_gradient: false
+
+template_matching:
+  method: TM_CCOEFF_NORMED
+  block_size: [64, 64]
+  step_size: 32
+  corr_threshold: 0.60
+
+orb:
+  n_features: 5000
+  scale_factor: 1.2
+  n_levels: 8
+  matcher_type: bf_crosscheck
+  spatial_distance_threshold: 15.0
+  hamming_threshold: 60.0
+  box_radius: 35

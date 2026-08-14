@@ -1,0 +1,7 @@
+{
+  "method": "THRESH_BINARY+THRESH_OTSU",
+  "iou_threshold": 0.5,
+  "selection_split": "not_applicable_automatic_threshold",
+  "algorithm": "raw_otsu",
+  "selection_metric": "not_applicable"
+}

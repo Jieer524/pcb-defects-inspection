@@ -25,12 +25,26 @@ from algorithms.template_matching import detect_template_matching
 
 ALGORITHM_VERSION = "raw-template_matching-v1"
 DEVELOPMENT_COUNT = 139
+DEFAULT_BLOCK_SIZE = (64, 64)
+DEFAULT_STEP_SIZE = 32
+DEFAULT_CORR_THRESHOLD = 0.68
+VALIDATION_CANDIDATES = {
+    "corr_threshold": [0.50, 0.60, 0.68, 0.75, 0.85],
+    "block_step_pairs": [
+        {"block_size": (32, 32), "step_size": 16},
+        {"block_size": (64, 64), "step_size": 32},
+        {"block_size": (96, 96), "step_size": 48},
+    ],
+}
 RESULT_FIELDS = [
     "image_id",
     "defect_class",
     "split",
     "algorithm_version",
     "template_matching_threshold",
+    "block_height",
+    "block_width",
+    "step_size",
     "predicted_count",
     "ground_truth_count",
     "true_positives",
@@ -78,7 +92,9 @@ def load_reference(path: Path) -> np.ndarray:
 def evaluate_record(
     row: dict[str, str],
     iou_threshold: float,
-    corr_threshold: float = 0.68,
+    corr_threshold: float = DEFAULT_CORR_THRESHOLD,
+    block_size: tuple[int, int] = DEFAULT_BLOCK_SIZE,
+    step_size: int = DEFAULT_STEP_SIZE,
     boxes_directory: Path | None = None,
 ) -> dict[str, str | int | float]:
     result: dict[str, str | int | float] = {
@@ -95,7 +111,13 @@ def evaluate_record(
         ground_truth_boxes = parse_voc_boxes(
             resolve_project_path(row["annotation_path"])
         )
-        detection = detect_template_matching(reference, defective, corr_threshold=corr_threshold)
+        detection = detect_template_matching(
+            reference,
+            defective,
+            block_size=block_size,
+            step_size=step_size,
+            corr_threshold=corr_threshold,
+        )
         metrics = evaluate_boxes(
             detection.boxes,
             ground_truth_boxes,
@@ -116,7 +138,7 @@ def evaluate_record(
                     ("ymin", "<i4"),
                     ("xmax", "<i4"),
                     ("ymax", "<i4"),
-                    ("contour_area", "<f4"),
+                    ("similarity", "<f4"),
                 ]
             )
             compact_boxes = np.fromiter(
@@ -126,7 +148,7 @@ def evaluate_record(
                         box["ymin"],
                         box["xmax"],
                         box["ymax"],
-                        box["contour_area"],
+                        box["similarity"],
                     )
                     for box in detection.boxes
                 ),
@@ -139,6 +161,9 @@ def evaluate_record(
         result.update(
             {
                 "template_matching_threshold": detection.corr_threshold,
+                "block_height": detection.block_size[0],
+                "block_width": detection.block_size[1],
+                "step_size": detection.step_size,
                 "predicted_count": len(detection.boxes),
                 "ground_truth_count": len(ground_truth_boxes),
                 **metrics,
@@ -159,7 +184,9 @@ def evaluate_record(
 def evaluate_records(
     rows: list[dict[str, str]],
     iou_threshold: float,
-    corr_threshold: float = 0.68,
+    corr_threshold: float = DEFAULT_CORR_THRESHOLD,
+    block_size: tuple[int, int] = DEFAULT_BLOCK_SIZE,
+    step_size: int = DEFAULT_STEP_SIZE,
     workers: int = 1,
     boxes_directory: Path | None = None,
 ) -> list[dict[str, str | int | float]]:
@@ -169,7 +196,16 @@ def evaluate_records(
     if workers == 1:
         results = []
         for index, row in enumerate(rows, start=1):
-            results.append(evaluate_record(row, iou_threshold, corr_threshold, boxes_directory))
+            results.append(
+                evaluate_record(
+                    row,
+                    iou_threshold,
+                    corr_threshold,
+                    block_size,
+                    step_size,
+                    boxes_directory,
+                )
+            )
             if index % 10 == 0 or index == len(rows):
                 print(f"Processed {index}/{len(rows)}", flush=True)
         return results
@@ -177,14 +213,25 @@ def evaluate_records(
     with ThreadPoolExecutor(max_workers=workers) as executor:
         return list(
             executor.map(
-                lambda row: evaluate_record(row, iou_threshold, corr_threshold, boxes_directory),
+                lambda row: evaluate_record(
+                    row,
+                    iou_threshold,
+                    corr_threshold,
+                    block_size,
+                    step_size,
+                    boxes_directory,
+                ),
                 rows,
             )
         )
 
 
 def summarise(
-    results: list[dict[str, str | int | float]], iou_threshold: float
+    results: list[dict[str, str | int | float]],
+    iou_threshold: float,
+    corr_threshold: float = DEFAULT_CORR_THRESHOLD,
+    block_size: tuple[int, int] = DEFAULT_BLOCK_SIZE,
+    step_size: int = DEFAULT_STEP_SIZE,
 ) -> dict[str, object]:
     successful = [result for result in results if result["status"] == "success"]
     runtimes = [float(result["processing_time_ms"]) for result in successful]
@@ -229,9 +276,16 @@ def summarise(
     return {
         "algorithm_version": ALGORITHM_VERSION,
         "split": "development",
+        "development_baseline": {
+            "corr_threshold": corr_threshold,
+            "block_size": list(block_size),
+            "step_size": step_size,
+            "method": "TM_CCOEFF_NORMED",
+        },
+        "validation_candidates": VALIDATION_CANDIDATES,
         "iou_threshold": iou_threshold,
         "predicted_boxes_format": (
-            "NumPy structured array: xmin,ymin,xmax,ymax int32; contour_area float32"
+            "NumPy structured array: xmin,ymin,xmax,ymax int32; similarity float32"
         ),
         "records": len(results),
         "successful": len(successful),
@@ -273,9 +327,12 @@ def main() -> None:
     parser.add_argument(
         "--corr-threshold",
         type=float,
-        default=0.68,
+        default=DEFAULT_CORR_THRESHOLD,
         help="NCC correlation threshold.",
     )
+    parser.add_argument("--block-height", type=int, default=DEFAULT_BLOCK_SIZE[0])
+    parser.add_argument("--block-width", type=int, default=DEFAULT_BLOCK_SIZE[1])
+    parser.add_argument("--step-size", type=int, default=DEFAULT_STEP_SIZE)
     parser.add_argument(
         "--manifest",
         type=Path,
@@ -306,10 +363,18 @@ def main() -> None:
         rows,
         args.iou_threshold,
         corr_threshold=args.corr_threshold,
+        block_size=(args.block_height, args.block_width),
+        step_size=args.step_size,
         workers=args.workers,
         boxes_directory=boxes_directory,
     )
-    summary = summarise(results, args.iou_threshold)
+    summary = summarise(
+        results,
+        args.iou_threshold,
+        corr_threshold=args.corr_threshold,
+        block_size=(args.block_height, args.block_width),
+        step_size=args.step_size,
+    )
     write_results(results, args.output)
     args.summary.parent.mkdir(parents=True, exist_ok=True)
     args.summary.write_text(

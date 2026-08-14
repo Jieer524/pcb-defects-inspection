@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 
 from algorithms.common import preprocess_pair
+from algorithms.contours import extract_external_boxes
 
 
 @dataclass(frozen=True)
@@ -22,41 +23,6 @@ class OtsuDetection:
     mask: np.ndarray
     boxes: list[dict[str, int | float]]
     processing_time_ms: float
-
-
-def extract_raw_boxes(binary_mask: np.ndarray) -> list[dict[str, int | float]]:
-    """Return one box per external contour without filtering or merging."""
-    if binary_mask is None or binary_mask.ndim != 2:
-        raise ValueError("A two-dimensional binary mask is required.")
-
-    contours, _ = cv2.findContours(
-        binary_mask,
-        cv2.RETR_EXTERNAL,
-        cv2.CHAIN_APPROX_SIMPLE,
-    )
-
-    boxes: list[dict[str, int | float]] = []
-    for contour in contours:
-        x, y, width, height = cv2.boundingRect(contour)
-        boxes.append(
-            {
-                "xmin": int(x),
-                "ymin": int(y),
-                "xmax": int(x + width),
-                "ymax": int(y + height),
-                "contour_area": float(cv2.contourArea(contour)),
-            }
-        )
-
-    return sorted(
-        boxes,
-        key=lambda box: (
-            int(box["ymin"]),
-            int(box["xmin"]),
-            int(box["ymax"]),
-            int(box["xmax"]),
-        ),
-    )
 
 
 def detect_otsu(reference: np.ndarray, defective: np.ndarray) -> OtsuDetection:
@@ -76,7 +42,7 @@ def detect_otsu(reference: np.ndarray, defective: np.ndarray) -> OtsuDetection:
         255,
         cv2.THRESH_BINARY + cv2.THRESH_OTSU,
     )
-    boxes = extract_raw_boxes(mask)
+    boxes = extract_external_boxes(mask)
 
     processing_time_ms = (perf_counter() - start_time) * 1000.0
     return OtsuDetection(

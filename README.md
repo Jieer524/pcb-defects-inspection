@@ -264,9 +264,52 @@ C:\venvs\pcb-env\Scripts\python.exe scripts\run_otsu_development.py
 
 Per-image metrics are written to `outputs/metrics/otsu_development.csv`. Complete
 unfiltered box arrays are stored separately under
-`outputs/metrics/otsu_development_boxes/` to keep the CSV manageable. The IoU 0.50
-matching rule is provisional for development diagnostics and must be frozen only
-after validation.
+`outputs/metrics/otsu_development_boxes/` to keep the CSV manageable. The common
+IoU 0.50 matching rule is now frozen for all four algorithms.
+
+## Experiment progress
+
+The four raw algorithms now share only dimension validation and grayscale
+conversion. Automatic resizing, Gaussian blur, morphology, contour filtering,
+box merging, and non-maximum suppression are disabled. Development uses 139
+images, parameter selection uses the separate 139-image validation split, and
+the 415-image test split is reserved for the final run.
+
+| Algorithm | Development | Validation-selected frozen settings |
+|---|---:|---|
+| Otsu | Complete | Automatic Otsu threshold; no tunable decision threshold |
+| Canny | Complete | low/high 50/150, aperture 3, L2 gradient off |
+| Template Matching | Complete | TM_CCOEFF_NORMED, block 64x64, step 32, threshold 0.60 |
+| ORB | Complete | BF cross-check, spatial 15, Hamming 60, box radius 35 |
+
+The authoritative combined configuration is `configs/frozen_parameters.yaml`.
+Development and validation work is shown in notebooks `02_otsu.ipynb` through
+`05_orb.ipynb`. The final comparison and plots are in
+`06_final_evaluation.ipynb`.
+
+Run the frozen test exactly once, after reviewing the configuration:
+
+```powershell
+C:\venvs\pcb-env\Scripts\python.exe scripts\run_final_evaluation.py --confirm-frozen-test --workers 2
+```
+
+### Final aligned test result
+
+The one-time frozen evaluation completed on all 415 test images with zero errors
+(1,660 image-algorithm records). Object-detection accuracy is not reported because
+true negatives are undefined for unconstrained bounding-box detection.
+
+| Algorithm | Precision | Recall | F1 | Mean runtime (ms/image) | False positives/image |
+|---|---:|---:|---:|---:|---:|
+| Template Matching | 0.009281 | 0.058658 | **0.016026** | **451.61** | **26.75** |
+| ORB | 0.001074 | 0.149464 | 0.002132 | 667.11 | 594.08 |
+| Otsu | 0.000008 | **0.331641** | 0.000016 | 5512.70 | 174301.82 |
+| Canny | 0.000003 | 0.019741 | 0.000006 | 791.90 | 28865.86 |
+
+Template Matching is the strongest raw baseline by F1, speed, and false-positive
+control. Otsu has the highest recall but produces an impractically large number
+of raw, unfiltered contours. These findings must not be used to retune the frozen
+algorithms; any refined or hybrid approach is a separate experiment.
 
 # Evaluation Metrics
 
