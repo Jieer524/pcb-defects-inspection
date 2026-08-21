@@ -25,16 +25,23 @@ class OtsuDetection:
     processing_time_ms: float
 
 
-def detect_otsu(reference: np.ndarray, defective: np.ndarray) -> OtsuDetection:
-    """Run the complete raw Otsu pipeline on an aligned image pair.
+def detect_otsu(
+    reference: np.ndarray,
+    defective: np.ndarray,
+    preprocessing_config: dict | None = None,
+) -> OtsuDetection:
+    """Run the Otsu pipeline, optionally applying shared preprocessing first.
 
-    Timing includes validation, grayscale conversion, absolute difference, Otsu
-    thresholding, direct contour extraction, and box construction. Disk I/O is
-    deliberately excluded so algorithm timings remain comparable.
+    Timing includes validation, grayscale conversion, optional preprocessing,
+    absolute difference, Otsu thresholding, direct contour extraction, and box
+    construction. Disk I/O is deliberately excluded so algorithm timings remain
+    comparable.
     """
     start_time = perf_counter()
 
-    reference_gray, defective_gray = preprocess_pair(reference, defective)
+    reference_gray, defective_gray = preprocess_pair(
+        reference, defective, preprocessing_config
+    )
     difference = cv2.absdiff(reference_gray, defective_gray)
     threshold, mask = cv2.threshold(
         difference,

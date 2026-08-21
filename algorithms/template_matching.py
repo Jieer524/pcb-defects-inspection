@@ -72,6 +72,7 @@ def detect_template_matching(
     block_size: tuple[int, int] = (64, 64),
     step_size: int = 32,
     corr_threshold: float = 0.68,
+    preprocessing_config: dict | None = None,
 ) -> TemplateMatchingDetection:
     """Compare aligned patches using raw ``TM_CCOEFF_NORMED`` scores.
 
@@ -86,7 +87,9 @@ def detect_template_matching(
         raise ValueError("step_size must be positive.")
 
     start_time = perf_counter()
-    reference_gray, defective_gray = preprocess_pair(reference, defective)
+    reference_gray, defective_gray = preprocess_pair(
+        reference, defective, preprocessing_config
+    )
     height, width = reference_gray.shape
     block_height, block_width = block_size
     if block_height > height or block_width > width:

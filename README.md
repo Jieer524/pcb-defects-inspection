@@ -95,10 +95,12 @@ pcb-defects-inspection/
 ├── algorithms/
 │   ├── __init__.py
 │   ├── common.py
+│   ├── preprocessing.py
 │   ├── otsu.py
 │   ├── canny.py
 │   ├── template_matching.py
-│   └── orb.py
+│   ├── orb.py
+│   └── orb_pseudocode.txt
 ├── notebooks/
 │   ├── 01_dataset_exploration_and_preprocessing.ipynb
 │   ├── 02_otsu.ipynb
@@ -269,23 +271,46 @@ IoU 0.50 matching rule is now frozen for all four algorithms.
 
 ## Experiment progress
 
-The four raw algorithms now share only dimension validation and grayscale
-conversion. Automatic resizing, Gaussian blur, morphology, contour filtering,
-box merging, and non-maximum suppression are disabled. Development uses 139
-images, parameter selection uses the separate 139-image validation split, and
-the 415-image test split is reserved for the final run.
+The four raw algorithms share the unified denoising + CLAHE preprocessing defined in
+`configs/frozen_parameters.yaml` (`preprocessing:` section), applied identically to
+every algorithm so the comparison stays fair. Automatic resizing, morphology,
+contour filtering, box merging, and non-maximum suppression remain disabled.
+ORB additionally applies optional spatial calibration (`calibrate: true`), a
+KNN + Lowe-ratio test plus RANSAC homography (`warpPerspective` alignment) before
+defect detection; this is an ORB-internal step, not shared preprocessing.
+Development uses 139 images, parameter selection uses the separate 139-image
+validation split, and the 415-image test split is reserved for the final run.
 
 | Algorithm | Development | Validation-selected frozen settings |
 |---|---:|---|
 | Otsu | Complete | Automatic Otsu threshold; no tunable decision threshold |
 | Canny | Complete | low/high 50/150, aperture 3, L2 gradient off |
 | Template Matching | Complete | TM_CCOEFF_NORMED, block 64x64, step 32, threshold 0.60 |
-| ORB | Complete | BF cross-check, spatial 15, Hamming 60, box radius 35 |
+| ORB | Complete | BF cross-check, spatial 15, Hamming 60, box radius 35, KNN+Lowe ratio 0.75, RANSAC reprojection 5.0, calibrate=true |
 
 The authoritative combined configuration is `configs/frozen_parameters.yaml`.
 Development and validation work is shown in notebooks `02_otsu.ipynb` through
 `05_orb.ipynb`. The final comparison and plots are in
 `06_final_evaluation.ipynb`.
+
+### Alignment diagnostic
+
+Before considering ORB-based registration, `scripts/analyze_alignment.py`
+measures the translation of every development and validation pair using phase
+correlation. It is a diagnostic only: it does not warp images, change the raw
+algorithms, or read the held-out test split.
+
+```powershell
+C:\venvs\pcb-env\Scripts\python.exe scripts\analyze_alignment.py
+```
+
+On the 278 non-test pairs, the median estimated translation was 0.003 pixels
+and 277 pairs were within 1 pixel. One development image (`06_spur_08`) is an
+isolated 47-pixel horizontal-shift outlier. Therefore the dataset supports the
+raw aligned baseline overall. ORB calibration (homography alignment) is
+enabled **inside** the ORB algorithm only — it is not a shared preprocessing
+step for the other three baselines, so the cross-algorithm comparison stays
+fair. It must not be reported as a standalone hybrid pipeline.
 
 Run the frozen test exactly once, after reviewing the configuration:
 
@@ -295,20 +320,25 @@ C:\venvs\pcb-env\Scripts\python.exe scripts\run_final_evaluation.py --confirm-fr
 
 ### Final aligned test result
 
-The one-time frozen evaluation completed on all 415 test images with zero errors
-(1,660 image-algorithm records). Object-detection accuracy is not reported because
-true negatives are undefined for unconstrained bounding-box detection.
+The frozen evaluation (pipeline version `raw-frozen-v2`: shared Gaussian denoising + CLAHE
+preprocessing for all algorithms, plus ORB spatial calibration) completed on all 415 test
+images with zero errors (1,660 image-algorithm records). Object-detection accuracy is not
+reported because true negatives are undefined for unconstrained bounding-box detection.
+Mean matched IoU (the reported overlap metric) is now `mean_matched_iou` from
+`final_test_summary.json`.
 
-| Algorithm | Precision | Recall | F1 | Mean runtime (ms/image) | False positives/image |
-|---|---:|---:|---:|---:|---:|
-| Template Matching | 0.009281 | 0.058658 | **0.016026** | **451.61** | **26.75** |
-| ORB | 0.001074 | 0.149464 | 0.002132 | 667.11 | 594.08 |
-| Otsu | 0.000008 | **0.331641** | 0.000016 | 5512.70 | 174301.82 |
-| Canny | 0.000003 | 0.019741 | 0.000006 | 791.90 | 28865.86 |
+| Algorithm | Precision | Recall | F1 (max) | Mean runtime (ms/image) | FP/image | Mean matched IoU |
+|---|---:|---:|---:|---:|---:|---:|
+| Template Matching | 0.009688 | 0.055838 | **0.016511** | **670.10** | **24.39** | 0.093710 |
+| ORB | 0.002186 | **0.240835** | 0.004333 | 1224.36 | 469.57 | **0.254365** |
+| Otsu | 1.17e-5 | 0.234067 | 2.34e-5 | 9855.19 | 85463.40 | 0.246533 |
+| Canny | 3.87e-6 | 0.026509 | 7.75e-6 | 2732.72 | 29234.36 | 0.060696 |
 
-Template Matching is the strongest raw baseline by F1, speed, and false-positive
-control. Otsu has the highest recall but produces an impractically large number
-of raw, unfiltered contours. These findings must not be used to retune the frozen
+Template Matching remains the strongest raw baseline by F1 (0.016511), false-positive
+control (24.39/image), and lowest mean runtime among the fast baselines; ORB has the
+highest mean matched IoU (0.254) and improves recall through calibration. Otsu has the
+highest recall among the contour-based baselines but produces an impractically large
+number of raw, unfiltered contours. These findings must not be used to retune the frozen
 algorithms; any refined or hybrid approach is a separate experiment.
 
 # Evaluation Metrics
@@ -348,12 +378,32 @@ Robustness tests:
 
 # Streamlit Dashboard
 
-The final dashboard may allow users to upload a reference image and test image, select an algorithm, inspect predicted masks and boxes, and view processing time and evaluation results.
+The dashboard supports all four frozen raw baselines (Otsu, Canny, Template
+Matching, ORB) with the shared preprocessing config applied automatically.
+Template Matching remains the recommended baseline. Beyond the original image
+upload + candidate display, the dashboard now also provides:
+- a **Defect Property Summary Table** (columns for pixel size, area, aspect
+  ratio, and similarity; plus mm-sized columns when a pixel-to-mm factor is
+  entered),
+- an **automated PDF inspection certificate** export (`fpdf2`), and
+- a **Batch Inspection** tab that runs a selected algorithm over all images of a
+  chosen defect class in the test split and exports the aggregate results as
+  JSON.
+
+The dashboard deliberately does not expose tunable algorithm parameters or
+hidden post-processing beyond the single frozen preprocessing config and the
+optional ORB calibration flag.
 
 Run it with:
 
 ```bash
 streamlit run app.py
+```
+
+On Windows with the project environment:
+
+```powershell
+C:\venvs\pcb-env\Scripts\streamlit.exe run app.py
 ```
 
 # Git Workflow
@@ -388,8 +438,8 @@ git push
 - Do not commit the dataset.
 - Do not commit the virtual environment.
 - Do not commit large generated outputs.
-- Use the same shared preprocessing for all four algorithms.
-- Keep algorithm-specific enhancements out of the baseline preprocessing.
+- Use the same shared preprocessing (Gaussian denoising + CLAHE) for all four algorithms via the `preprocessing:` config.
+- Keep algorithm-specific enhancements (e.g. ORB homography calibration) out of the shared preprocessing; calibration lives inside the ORB algorithm only.
 - Keep experiments and visualisations in notebooks.
 - Move reusable functions into `algorithms/`.
 - Record all parameters and processing times.

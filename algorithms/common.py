@@ -3,6 +3,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from algorithms.preprocessing import preprocess_image
+
 
 def load_image(path: str | Path) -> np.ndarray:
     image_path = Path(path)
@@ -52,11 +54,16 @@ def to_grayscale(image: np.ndarray) -> np.ndarray:
 def preprocess_pair(
     reference: np.ndarray,
     defective: np.ndarray,
+    preprocessing_config: dict | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Apply only the neutral preprocessing shared by all raw algorithms.
+    """Convert both images to grayscale and optionally apply shared preprocessing.
 
-    Algorithm-specific representations such as absolute differences, edge maps,
-    similarity responses, and descriptors must be created by each algorithm.
+    When ``preprocessing_config`` is ``None`` (the default), behaviour is unchanged
+    from the raw pipeline: both images are converted to grayscale only. When a dict
+    is provided, both grayscale images additionally pass through ``denoise`` ->
+    ``enhance_contrast`` per the config.
     """
     validate_pair(reference, defective)
-    return to_grayscale(reference), to_grayscale(defective)
+    reference_gray = preprocess_image(to_grayscale(reference), preprocessing_config)
+    defective_gray = preprocess_image(to_grayscale(defective), preprocessing_config)
+    return reference_gray, defective_gray

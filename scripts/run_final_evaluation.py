@@ -24,10 +24,11 @@ from algorithms.common import load_image
 from algorithms.evaluation import evaluate_boxes, parse_voc_boxes
 from algorithms.orb import detect_orb
 from algorithms.otsu import detect_otsu
+from algorithms.preprocessing import build_preprocessing_config
 from algorithms.template_matching import detect_template_matching
 
 TEST_COUNT = 415
-ALGORITHM_VERSION = "raw-frozen-v1"
+ALGORITHM_VERSION = "raw-frozen-v2"
 ALGORITHMS = ("otsu", "canny", "template_matching", "orb")
 
 
@@ -52,6 +53,11 @@ def load_frozen_config(config_path: Path) -> dict[str, object]:
     return config
 
 
+def resolve_preprocessing_config(config: dict[str, object]) -> dict:
+    """Build the preprocessing_config dict consumed by the frozen algorithms."""
+    return build_preprocessing_config(config.get("preprocessing"))
+
+
 @lru_cache(maxsize=16)
 def load_reference(path: Path) -> np.ndarray:
     return load_image(path)
@@ -62,9 +68,10 @@ def run_detector(
     reference: np.ndarray,
     defective: np.ndarray,
     config: dict[str, object],
+    preprocessing_config: dict,
 ):
     if algorithm == "otsu":
-        return detect_otsu(reference, defective)
+        return detect_otsu(reference, defective, preprocessing_config=preprocessing_config)
     if algorithm == "canny":
         params = config["canny"]
         return detect_canny(
@@ -74,6 +81,7 @@ def run_detector(
             high_threshold=params["high_threshold"],
             aperture_size=params["aperture_size"],
             l2_gradient=params["l2_gradient"],
+            preprocessing_config=preprocessing_config,
         )
     if algorithm == "template_matching":
         params = config["template_matching"]
@@ -83,6 +91,7 @@ def run_detector(
             block_size=tuple(params["block_size"]),
             step_size=params["step_size"],
             corr_threshold=params["corr_threshold"],
+            preprocessing_config=preprocessing_config,
         )
     if algorithm == "orb":
         params = config["orb"]
@@ -96,6 +105,9 @@ def run_detector(
             hamming_threshold=params["hamming_threshold"],
             box_radius=params["box_radius"],
             matcher_type=params["matcher_type"],
+            calibrate=bool(params.get("calibrate", False)),
+            ransac_reproj_threshold=float(params.get("ransac_reproj_threshold", 5.0)),
+            preprocessing_config=preprocessing_config,
         )
     raise ValueError(f"Unknown algorithm: {algorithm}")
 
@@ -115,6 +127,7 @@ def evaluate_record(
     row: dict[str, str],
     config: dict[str, object],
     boxes_root: Path,
+    preprocessing_config: dict,
 ) -> dict[str, object]:
     result: dict[str, object] = {
         "image_id": row["image_id"],
@@ -122,6 +135,17 @@ def evaluate_record(
         "split": row["split"],
         "algorithm": algorithm,
         "algorithm_version": ALGORITHM_VERSION,
+        "parameter_config": json.dumps(
+            {
+                **{
+                    name: config[name]
+                    for name in ("otsu", "canny", "template_matching", "orb")
+                    if name in config
+                },
+                "preprocessing": config.get("preprocessing", {}),
+            },
+            separators=(",", ":"),
+        ),
         "status": "error",
         "error": "",
     }
@@ -129,7 +153,9 @@ def evaluate_record(
         reference = load_reference(resolve_project_path(row["reference_path"]))
         defective = load_image(resolve_project_path(row["image_path"]))
         truth = parse_voc_boxes(resolve_project_path(row["annotation_path"]))
-        detection = run_detector(algorithm, reference, defective, config)
+        detection = run_detector(
+            algorithm, reference, defective, config, preprocessing_config
+        )
         metrics = evaluate_boxes(
             detection.boxes,
             truth,
@@ -138,7 +164,6 @@ def evaluate_record(
         boxes_path = boxes_root / algorithm / f"{row['image_id']}.npy"
         result.update(
             {
-                "parameter_config": json.dumps(config[algorithm], separators=(",", ":")),
                 "predicted_count": len(detection.boxes),
                 "ground_truth_count": len(truth),
                 **metrics,
@@ -192,6 +217,8 @@ def summarise(results: list[dict[str, object]], config: dict[str, object]) -> di
         "split": "test",
         "test_images": TEST_COUNT,
         "iou_threshold": config["protocol"]["iou_threshold"],
+        "preprocessing": config.get("preprocessing", {}),
+        "orb_calibrate": bool(config["orb"].get("calibrate", False)),
         "class_distribution": dict(sorted(Counter(row["defect_class"] for row in results if row["algorithm"] == "otsu").items())),
         "overall": {name: aggregate(by_algorithm[name]) for name in ALGORITHMS},
         "by_class": {
@@ -230,6 +257,7 @@ def main() -> None:
 
     config = load_frozen_config(args.config)
     rows = load_test_rows(args.manifest)
+    preprocessing_config = resolve_preprocessing_config(config)
     boxes_root = args.output.parent / "final_test_boxes"
     all_results: list[dict[str, object]] = []
     for algorithm in ALGORITHMS:
@@ -237,14 +265,18 @@ def main() -> None:
         if args.workers == 1:
             algorithm_results = []
             for index, row in enumerate(rows, start=1):
-                algorithm_results.append(evaluate_record(algorithm, row, config, boxes_root))
+                algorithm_results.append(
+                    evaluate_record(algorithm, row, config, boxes_root, preprocessing_config)
+                )
                 if index % 10 == 0 or index == len(rows):
                     print(f"  {algorithm}: {index}/{len(rows)}", flush=True)
         else:
             with ThreadPoolExecutor(max_workers=args.workers) as executor:
                 algorithm_results = []
                 evaluated = executor.map(
-                    lambda row: evaluate_record(algorithm, row, config, boxes_root),
+                    lambda row: evaluate_record(
+                        algorithm, row, config, boxes_root, preprocessing_config
+                    ),
                     rows,
                 )
                 for index, result in enumerate(evaluated, start=1):

@@ -32,6 +32,93 @@ class ORBDetection:
     hamming_threshold: float
     box_radius: int
     matcher_type: str
+    calibrated: bool
+    homography_matrix: np.ndarray | None
+    inlier_count: int
+
+
+def calibrate_alignment(
+    reference_gray: np.ndarray,
+    defective_gray: np.ndarray,
+    n_features: int = 5000,
+    scale_factor: float = 1.2,
+    n_levels: int = 8,
+    ratio_threshold: float = 0.75,
+    ransac_reproj_threshold: float = 5.0,
+) -> tuple[np.ndarray, np.ndarray | None, int]:
+    """Compute an ORB homography and warp the defective image to align with the reference.
+
+    Uses KNN + Lowe's ratio test to obtain good matches, then ``RANSAC``
+    ``findHomography`` to estimate a projective transform, which is applied with
+    ``warpPerspective`` to align the defective image to the reference.
+
+    Returns:
+        aligned_defective: The warped defective image (or the original input if
+            alignment fails due to insufficient matches).
+        homography_matrix: 3x3 homography (or None if alignment fails).
+        inlier_count: Number of RANSAC inliers (0 if alignment fails).
+    """
+    if n_features <= 0:
+        raise ValueError("n_features must be positive.")
+    if scale_factor <= 1.0:
+        raise ValueError("scale_factor must be greater than 1.")
+    if n_levels <= 0:
+        raise ValueError("n_levels must be positive.")
+    if not 0.0 < ratio_threshold < 1.0:
+        raise ValueError("ratio_threshold must be between 0 and 1.")
+    if ransac_reproj_threshold <= 0.0:
+        raise ValueError("ransac_reproj_threshold must be positive.")
+
+    orb = cv2.ORB_create(
+        nfeatures=n_features,
+        scaleFactor=scale_factor,
+        nlevels=n_levels,
+    )
+
+    kp_ref, des_ref = orb.detectAndCompute(reference_gray, None)
+    kp_def, des_def = orb.detectAndCompute(defective_gray, None)
+
+    if (
+        des_ref is None
+        or des_def is None
+        or len(des_ref) == 0
+        or len(des_def) == 0
+    ):
+        return defective_gray, None, 0
+
+    bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=False)
+    knn_matches = bf.knnMatch(des_def, des_ref, k=2)
+
+    src_points = []
+    dst_points = []
+    for pair in knn_matches:
+        if len(pair) == 2:
+            m, n = pair
+            if m.distance < ratio_threshold * n.distance:
+                src_points.append(kp_def[m.queryIdx].pt)
+                dst_points.append(kp_ref[m.trainIdx].pt)
+
+    if len(src_points) < 4:
+        return defective_gray, None, 0
+
+    src = np.float32(src_points).reshape(-1, 1, 2)
+    dst = np.float32(dst_points).reshape(-1, 1, 2)
+    homography, inlier_mask = cv2.findHomography(
+        src, dst, cv2.RANSAC, ransac_reproj_threshold
+    )
+
+    if homography is None:
+        return defective_gray, None, 0
+
+    inlier_count = int(np.sum(inlier_mask)) if inlier_mask is not None else 0
+    if inlier_count < 4:
+        return defective_gray, None, 0
+
+    height, width = reference_gray.shape[:2]
+    aligned = cv2.warpPerspective(
+        defective_gray, homography, (width, height)
+    )
+    return aligned, homography, inlier_count
 
 
 def extract_raw_boxes_from_points(
@@ -92,6 +179,9 @@ def detect_orb(
     box_radius: int = 35,
     matcher_type: str = "bf_crosscheck",
     ratio_threshold: float = 0.75,
+    calibrate: bool = False,
+    ransac_reproj_threshold: float = 5.0,
+    preprocessing_config: dict | None = None,
 ) -> ORBDetection:
     """Run the raw ORB feature detection and matching pipeline on an aligned image pair.
 
@@ -121,10 +211,30 @@ def detect_orb(
         raise ValueError("box_radius must be positive.")
     if not 0.0 < ratio_threshold < 1.0:
         raise ValueError("ratio_threshold must be between 0 and 1.")
+    if ransac_reproj_threshold <= 0.0:
+        raise ValueError("ransac_reproj_threshold must be positive.")
 
     start_time = perf_counter()
 
-    reference_gray, defective_gray = preprocess_pair(reference, defective)
+    reference_gray, defective_gray = preprocess_pair(
+        reference, defective, preprocessing_config
+    )
+
+    homography_matrix: np.ndarray | None = None
+    inlier_count = 0
+    calibrated = False
+    if calibrate:
+        defective_gray, homography_matrix, inlier_count = calibrate_alignment(
+            reference_gray,
+            defective_gray,
+            n_features=n_features,
+            scale_factor=scale_factor,
+            n_levels=n_levels,
+            ratio_threshold=ratio_threshold,
+            ransac_reproj_threshold=ransac_reproj_threshold,
+        )
+        calibrated = homography_matrix is not None
+
     image_shape = defective_gray.shape[:2]
 
     # Initialize raw OpenCV ORB detector
@@ -238,4 +348,7 @@ def detect_orb(
         hamming_threshold=hamming_threshold,
         box_radius=box_radius,
         matcher_type=matcher_type,
+        calibrated=calibrated,
+        homography_matrix=homography_matrix,
+        inlier_count=inlier_count,
     )

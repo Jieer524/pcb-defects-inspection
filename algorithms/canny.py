@@ -36,15 +36,23 @@ def detect_canny(
     high_threshold: float = 150.0,
     aperture_size: int = 3,
     l2_gradient: bool = False,
+    preprocessing_config: dict | None = None,
 ) -> CannyDetection:
-    """Apply Canny independently, then directly compare the two edge maps."""
+    """Apply Canny independently, then compare the two edge maps.
+
+    An optional ``preprocessing_config`` dict is passed to ``preprocess_pair`` so
+    the two grayscale images can be denoised and contrast-enhanced before edge
+    detection. ``None`` preserves the original raw behaviour.
+    """
     if low_threshold < 0 or high_threshold <= low_threshold:
         raise ValueError("Canny thresholds require 0 <= low < high.")
     if aperture_size not in (3, 5, 7):
         raise ValueError("Canny aperture_size must be 3, 5, or 7.")
 
     start_time = perf_counter()
-    reference_gray, defective_gray = preprocess_pair(reference, defective)
+    reference_gray, defective_gray = preprocess_pair(
+        reference, defective, preprocessing_config
+    )
     reference_edges = cv2.Canny(
         reference_gray,
         low_threshold,
