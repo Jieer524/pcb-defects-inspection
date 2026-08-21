@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 
 from algorithms.common import preprocess_pair
+from algorithms.contours import extract_external_boxes
 
 
 @dataclass(frozen=True)
@@ -117,7 +118,7 @@ def detect_template_matching(
             )
             similarity_map[row_index, column_index] = score
 
-    boxes = boxes_from_similarity_map(
+    raw_boxes = boxes_from_similarity_map(
         similarity_map,
         (height, width),
         block_size,
@@ -125,11 +126,45 @@ def detect_template_matching(
         corr_threshold,
     )
     defect_mask = np.zeros((height, width), dtype=np.uint8)
-    for box in boxes:
+    for box in raw_boxes:
         defect_mask[
             int(box["ymin"]) : int(box["ymax"]),
             int(box["xmin"]) : int(box["xmax"]),
         ] = 255
+
+    contours, _ = cv2.findContours(
+        defect_mask,
+        cv2.RETR_EXTERNAL,
+        cv2.CHAIN_APPROX_SIMPLE,
+    )
+    boxes: list[dict[str, int | float]] = []
+    for contour in contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        xmin, ymin, xmax, ymax = int(x), int(y), int(x + w), int(y + h)
+        matching_sims = [
+            float(b["similarity"])
+            for b in raw_boxes
+            if not (b["xmax"] <= xmin or b["xmin"] >= xmax or b["ymax"] <= ymin or b["ymin"] >= ymax)
+        ]
+        similarity = min(matching_sims) if matching_sims else 0.0
+        boxes.append(
+            {
+                "xmin": xmin,
+                "ymin": ymin,
+                "xmax": xmax,
+                "ymax": ymax,
+                "contour_area": float(cv2.contourArea(contour)),
+                "similarity": similarity,
+            }
+        )
+    boxes.sort(
+        key=lambda box: (
+            int(box["ymin"]),
+            int(box["xmin"]),
+            int(box["ymax"]),
+            int(box["xmax"]),
+        )
+    )
 
     processing_time_ms = (perf_counter() - start_time) * 1000.0
     return TemplateMatchingDetection(

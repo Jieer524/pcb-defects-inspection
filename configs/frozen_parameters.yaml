@@ -14,18 +14,23 @@ protocol:
 
 otsu:
   method: THRESH_BINARY+THRESH_OTSU
+  blur_ksize: 3
+  morph_dilate: 35
+  min_area: 150.0
 
 canny:
   low_threshold: 50
   high_threshold: 150
   aperture_size: 3
   l2_gradient: false
+  morph_close: 5
+  min_area: 300.0
 
 template_matching:
   method: TM_CCOEFF_NORMED
-  block_size: [64, 64]
-  step_size: 32
-  corr_threshold: 0.60
+  block_size: [32, 32]
+  step_size: 16
+  corr_threshold: 0.65
 
 orb:
   n_features: 5000
@@ -33,8 +38,10 @@ orb:
   n_levels: 8
   matcher_type: bf_crosscheck
   spatial_distance_threshold: 15.0
-  hamming_threshold: 60.0
-  box_radius: 35
+  hamming_threshold: 40.0
+  box_radius: 20
   calibrate: true
   ratio_threshold: 0.75
   ransac_reproj_threshold: 5.0
+  merge_points: true
+  min_area: 300.0

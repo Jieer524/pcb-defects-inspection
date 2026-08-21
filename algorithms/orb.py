@@ -182,6 +182,9 @@ def detect_orb(
     calibrate: bool = False,
     ransac_reproj_threshold: float = 5.0,
     preprocessing_config: dict | None = None,
+    merge_points: bool = False,
+    morph_dilate: int = 0,
+    min_area: float = 0.0,
 ) -> ORBDetection:
     """Run the raw ORB feature detection and matching pipeline on an aligned image pair.
 
@@ -193,7 +196,10 @@ def detect_orb(
        - Matches with spatial displacement > `spatial_distance_threshold`
        - Matches with descriptor Hamming distance > `hamming_threshold`
        - Unmatched keypoints on the defective image
-    5. Directly form raw predicted bounding boxes around defect points without filtering/merging.
+    5. Build bounding boxes:
+       - If merge_points=False: fixed-radius boxes around each defect point (raw baseline).
+       - If merge_points=True: paint defect points onto a binary mask with `box_radius`,
+         optionally dilate, extract contours, and filter by min_area.
     """
     if matcher_type not in ("bf_crosscheck", "knn_ratio"):
         raise ValueError(
@@ -323,11 +329,57 @@ def detect_orb(
             for kp in kp_def:
                 defect_points.append((float(kp.pt[0]), float(kp.pt[1])))
 
-    boxes = extract_raw_boxes_from_points(
-        defect_points,
-        image_shape=image_shape,
-        box_radius=box_radius,
-    )
+    # --- Box construction ---
+    if merge_points and defect_points:
+        # Paint defect points onto a binary mask, merge via contours
+        height, width = image_shape
+        point_mask = np.zeros((height, width), dtype=np.uint8)
+        for px, py in defect_points:
+            x_c, y_c = int(round(px)), int(round(py))
+            x1 = max(0, x_c - box_radius)
+            y1 = max(0, y_c - box_radius)
+            x2 = min(width, x_c + box_radius)
+            y2 = min(height, y_c + box_radius)
+            point_mask[y1:y2, x1:x2] = 255
+
+        if morph_dilate > 0:
+            kernel_dilate = cv2.getStructuringElement(
+                cv2.MORPH_RECT, (morph_dilate, morph_dilate)
+            )
+            point_mask = cv2.morphologyEx(point_mask, cv2.MORPH_DILATE, kernel_dilate)
+
+        contours, _ = cv2.findContours(
+            point_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+        boxes: list[dict[str, int | float]] = []
+        for cnt in contours:
+            area = float(cv2.contourArea(cnt))
+            if area < min_area:
+                continue
+            x, y, w, h = cv2.boundingRect(cnt)
+            boxes.append(
+                {
+                    "xmin": int(x),
+                    "ymin": int(y),
+                    "xmax": int(x + w),
+                    "ymax": int(y + h),
+                    "contour_area": area,
+                }
+            )
+        boxes.sort(
+            key=lambda box: (
+                int(box["ymin"]),
+                int(box["xmin"]),
+                int(box["ymax"]),
+                int(box["xmax"]),
+            )
+        )
+    else:
+        boxes = extract_raw_boxes_from_points(
+            defect_points,
+            image_shape=image_shape,
+            box_radius=box_radius,
+        )
 
     processing_time_ms = (perf_counter() - start_time) * 1000.0
 
@@ -352,3 +404,4 @@ def detect_orb(
         homography_matrix=homography_matrix,
         inlier_count=inlier_count,
     )
+

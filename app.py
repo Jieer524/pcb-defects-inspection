@@ -73,7 +73,16 @@ def run_detection(
 ):
     """Dispatch to the selected algorithm with the frozen + preprocessing configs."""
     if algorithm == "otsu":
-        return detect_otsu(reference, defective, preprocessing_config=preprocessing_config)
+        section = config.get("otsu", {})
+        return detect_otsu(
+            reference,
+            defective,
+            preprocessing_config=preprocessing_config,
+            blur_ksize=int(section.get("blur_ksize", 3)),
+            morph_open=int(section.get("morph_open", 0)),
+            morph_dilate=int(section.get("morph_dilate", 35)),
+            min_area=float(section.get("min_area", 150.0)),
+        )
     if algorithm == "canny":
         section = config["canny"]
         return detect_canny(
@@ -84,6 +93,9 @@ def run_detection(
             aperture_size=int(section["aperture_size"]),
             l2_gradient=bool(section["l2_gradient"]),
             preprocessing_config=preprocessing_config,
+            morph_dilate=int(section.get("morph_dilate", 0)),
+            morph_close=int(section.get("morph_close", 5)),
+            min_area=float(section.get("min_area", 300.0)),
         )
     if algorithm == "template_matching":
         section = config["template_matching"]
@@ -107,9 +119,12 @@ def run_detection(
             spatial_distance_threshold=float(section["spatial_distance_threshold"]),
             hamming_threshold=float(section["hamming_threshold"]),
             box_radius=int(section["box_radius"]),
-            calibrate=bool(section.get("calibrate", False)),
+            calibrate=bool(section.get("calibrate", True)),
             ransac_reproj_threshold=float(section.get("ransac_reproj_threshold", 5.0)),
             preprocessing_config=preprocessing_config,
+            merge_points=bool(section.get("merge_points", True)),
+            morph_dilate=int(section.get("morph_dilate", 0)),
+            min_area=float(section.get("min_area", 300.0)),
         )
     raise ValueError(f"Unsupported algorithm '{algorithm}'.")
 
