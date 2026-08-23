@@ -103,11 +103,21 @@ pcb-defects-inspection/
 │   └── orb_pseudocode.txt
 ├── notebooks/
 │   ├── 01_dataset_exploration_and_preprocessing.ipynb
-│   ├── 02_otsu.ipynb
-│   ├── 03_canny.ipynb
-│   ├── 04_template_matching.ipynb
-│   ├── 05_orb.ipynb
-│   └── 06_comparison.ipynb
+│   ├── development/
+│   │   ├── 02_otsu.ipynb
+│   │   ├── 03_canny.ipynb
+│   │   ├── 04_template_matching.ipynb
+│   │   └── 05_orb.ipynb
+│   ├── validation/
+│   │   ├── 00_algorithm_comparison.ipynb
+│   │   ├── 02_otsu_validation.ipynb
+│   │   ├── 03_canny_validation.ipynb
+│   │   ├── 04_template_matching_validation.ipynb
+│   │   ├── 05_orb_validation.ipynb
+│   │   └── algorithm_enhancement_comparison.md
+│   └── final_evaluation/
+│       ├── 06_final_evaluation.ipynb
+│       └── final_test_evaluation_report.md
 ├── data/
 │   ├── raw/
 │   │   └── PCB_DATASET/
@@ -261,7 +271,7 @@ extraction without blur, resizing, morphology, contour filtering, or merging.
 Run only the manifest's 139-image development split with:
 
 ```powershell
-C:\venvs\pcb-env\Scripts\python.exe scripts\run_otsu_development.py
+C:\venvs\pcb-env\Scripts\python.exe scripts\development\run_otsu_development.py
 ```
 
 Per-image metrics are written to `outputs/metrics/otsu_development.csv`. Complete
@@ -289,19 +299,19 @@ validation split, and the 415-image test split is reserved for the final run.
 | ORB | Complete | BF cross-check, spatial 15, Hamming 60, box radius 35, KNN+Lowe ratio 0.75, RANSAC reprojection 5.0, calibrate=true |
 
 The authoritative combined configuration is `configs/frozen_parameters.yaml`.
-Development and validation work is shown in notebooks `02_otsu.ipynb` through
-`05_orb.ipynb`. The final comparison and plots are in
-`06_final_evaluation.ipynb`.
+Development and validation work is shown in `notebooks/development/` (`02_otsu.ipynb`
+through `05_orb.ipynb`). Ablation studies are in `notebooks/validation/`. The final
+test benchmark and plots are in `notebooks/final_evaluation/06_final_evaluation.ipynb`.
 
 ### Alignment diagnostic
 
-Before considering ORB-based registration, `scripts/analyze_alignment.py`
+Before considering ORB-based registration, `scripts/evaluation/analyze_alignment.py`
 measures the translation of every development and validation pair using phase
 correlation. It is a diagnostic only: it does not warp images, change the raw
 algorithms, or read the held-out test split.
 
 ```powershell
-C:\venvs\pcb-env\Scripts\python.exe scripts\analyze_alignment.py
+C:\venvs\pcb-env\Scripts\python.exe scripts\evaluation\analyze_alignment.py
 ```
 
 On the 278 non-test pairs, the median estimated translation was 0.003 pixels
@@ -315,7 +325,7 @@ fair. It must not be reported as a standalone hybrid pipeline.
 Run the frozen test exactly once, after reviewing the configuration:
 
 ```powershell
-C:\venvs\pcb-env\Scripts\python.exe scripts\run_final_evaluation.py --confirm-frozen-test --workers 2
+C:\venvs\pcb-env\Scripts\python.exe scripts\evaluation\run_final_evaluation.py --confirm-frozen-test --workers 2
 ```
 
 ### Final aligned test result

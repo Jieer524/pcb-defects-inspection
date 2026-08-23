@@ -76,7 +76,7 @@ Do not use Gaussian blur, morphology, connected-component merging, contour filte
 
 Use the development set to implement and debug the four methods. Keep a separate notebook for each method.
 
-### 5.1 Raw Otsu thresholding — `02_otsu.ipynb`
+### 5.1 Raw Otsu thresholding — `notebooks/development/02_otsu.ipynb`
 
 ```text
 Reference and defective grayscale images
@@ -87,7 +87,7 @@ Reference and defective grayscale images
 → predicted defect boxes
 ```
 
-### 5.2 Raw Canny edge detection — `03_canny.ipynb`
+### 5.2 Raw Canny edge detection — `notebooks/development/03_canny.ipynb`
 
 ```text
 Reference and defective grayscale images
@@ -99,7 +99,7 @@ Reference and defective grayscale images
 
 Do not connect broken edges, dilate edges, or merge nearby regions.
 
-### 5.3 Raw template matching — `04_template_matching.ipynb`
+### 5.3 Raw template matching — `notebooks/development/04_template_matching.ipynb`
 
 ```text
 Reference image and defective image
@@ -111,7 +111,7 @@ Reference image and defective image
 
 Do not smooth the response map, merge detections, or apply non-maximum suppression unless the chosen library operation intrinsically requires it; any such requirement must be disclosed consistently.
 
-### 5.4 Raw ORB feature matching — `05_orb.ipynb`
+### 5.4 Raw ORB feature matching — `notebooks/development/05_orb.ipynb`
 
 ```text
 Reference image and defective image
@@ -171,11 +171,21 @@ project/
 │   └── frozen_parameters.yaml
 ├── notebooks/
 │   ├── 01_dataset_exploration_and_preprocessing.ipynb
-│   ├── 02_otsu.ipynb
-│   ├── 03_canny.ipynb
-│   ├── 04_template_matching.ipynb
-│   ├── 05_orb.ipynb
-│   └── 06_final_evaluation.ipynb
+│   ├── development/
+│   │   ├── 02_otsu.ipynb
+│   │   ├── 03_canny.ipynb
+│   │   ├── 04_template_matching.ipynb
+│   │   └── 05_orb.ipynb
+│   ├── validation/
+│   │   ├── 00_algorithm_comparison.ipynb
+│   │   ├── 02_otsu_validation.ipynb
+│   │   ├── 03_canny_validation.ipynb
+│   │   ├── 04_template_matching_validation.ipynb
+│   │   ├── 05_orb_validation.ipynb
+│   │   └── algorithm_enhancement_comparison.md
+│   └── final_evaluation/
+│       ├── 06_final_evaluation.ipynb
+│       └── final_test_evaluation_report.md
 ├── results/
 ├── app.py
 └── README.md

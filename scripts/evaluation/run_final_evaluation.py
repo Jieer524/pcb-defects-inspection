@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -71,42 +71,57 @@ def run_detector(
     preprocessing_config: dict,
 ):
     if algorithm == "otsu":
-        return detect_otsu(reference, defective, preprocessing_config=preprocessing_config)
+        params = config.get("otsu", {})
+        return detect_otsu(
+            reference,
+            defective,
+            blur_ksize=int(params.get("blur_ksize", 3)),
+            morph_open=int(params.get("morph_open", 0)),
+            morph_dilate=int(params.get("morph_dilate", 35)),
+            min_area=float(params.get("min_area", 150.0)),
+            preprocessing_config=preprocessing_config,
+        )
     if algorithm == "canny":
-        params = config["canny"]
+        params = config.get("canny", {})
         return detect_canny(
             reference,
             defective,
-            low_threshold=params["low_threshold"],
-            high_threshold=params["high_threshold"],
-            aperture_size=params["aperture_size"],
-            l2_gradient=params["l2_gradient"],
+            low_threshold=float(params["low_threshold"]),
+            high_threshold=float(params["high_threshold"]),
+            aperture_size=int(params["aperture_size"]),
+            l2_gradient=bool(params["l2_gradient"]),
+            morph_dilate=int(params.get("morph_dilate", 0)),
+            morph_close=int(params.get("morph_close", 5)),
+            min_area=float(params.get("min_area", 300.0)),
             preprocessing_config=preprocessing_config,
         )
     if algorithm == "template_matching":
-        params = config["template_matching"]
+        params = config.get("template_matching", {})
         return detect_template_matching(
             reference,
             defective,
             block_size=tuple(params["block_size"]),
-            step_size=params["step_size"],
-            corr_threshold=params["corr_threshold"],
+            step_size=int(params["step_size"]),
+            corr_threshold=float(params["corr_threshold"]),
             preprocessing_config=preprocessing_config,
         )
     if algorithm == "orb":
-        params = config["orb"]
+        params = config.get("orb", {})
         return detect_orb(
             reference,
             defective,
-            n_features=params["n_features"],
-            scale_factor=params["scale_factor"],
-            n_levels=params["n_levels"],
-            spatial_distance_threshold=params["spatial_distance_threshold"],
-            hamming_threshold=params["hamming_threshold"],
-            box_radius=params["box_radius"],
-            matcher_type=params["matcher_type"],
+            n_features=int(params["n_features"]),
+            scale_factor=float(params["scale_factor"]),
+            n_levels=int(params["n_levels"]),
+            spatial_distance_threshold=float(params["spatial_distance_threshold"]),
+            hamming_threshold=float(params["hamming_threshold"]),
+            box_radius=int(params["box_radius"]),
+            matcher_type=str(params["matcher_type"]),
             calibrate=bool(params.get("calibrate", False)),
             ransac_reproj_threshold=float(params.get("ransac_reproj_threshold", 5.0)),
+            merge_points=bool(params.get("merge_points", True)),
+            morph_dilate=int(params.get("morph_dilate", 0)),
+            min_area=float(params.get("min_area", 300.0)),
             preprocessing_config=preprocessing_config,
         )
     raise ValueError(f"Unknown algorithm: {algorithm}")
