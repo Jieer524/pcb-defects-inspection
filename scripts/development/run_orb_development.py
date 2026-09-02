@@ -272,7 +272,9 @@ def summarise(
         "algorithm_version": ALGORITHM_VERSION,
         "split": "development",
         "development_baseline": DEVELOPMENT_BASELINE,
-        "validation_frozen_config_path": "configs/orb_frozen_parameters.json",
+        "legacy_raw_validation_record": (
+            "configs/legacy_raw_validation/orb_validation_record.json"
+        ),
         "iou_threshold": iou_threshold,
         "predicted_boxes_format": "NumPy structured array: xmin,ymin,xmax,ymax int32",
         "records": len(results),

@@ -1,0 +1,16 @@
+# Predetermined before enhanced-algorithm validation.
+# Validation may optimize algorithm-specific settings, but not this shared pipeline.
+preprocessing:
+  enabled: true
+  denoise_method: gaussian
+  denoise_kernel_size: 3
+  contrast_enhancement: clahe
+  clahe_clip_limit: 2.0
+  clahe_tile_size: 8
+
+protocol:
+  manifest: data/dataset_split.csv
+  validation_images: 139
+  test_images: 415
+  iou_threshold: 0.50
+  selection_metric: f1_score

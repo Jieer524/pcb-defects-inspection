@@ -1,4 +1,4 @@
-"""Run the four frozen raw algorithms once on the held-out test split."""
+"""Run the four validation-selected enhanced algorithms on the held-out test split."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from algorithms.preprocessing import build_preprocessing_config
 from algorithms.template_matching import detect_template_matching
 
 TEST_COUNT = 415
-ALGORITHM_VERSION = "raw-frozen-v2"
+ALGORITHM_VERSION = "enhanced-frozen-v1"
 ALGORITHMS = ("otsu", "canny", "template_matching", "orb")
 
 
@@ -50,6 +50,14 @@ def load_frozen_config(config_path: Path) -> dict[str, object]:
     protocol = config["protocol"]
     if protocol["test_images"] != TEST_COUNT or protocol["iou_threshold"] != 0.5:
         raise ValueError("Frozen protocol must specify 415 test images and IoU 0.50.")
+    selection = config.get("selection", {})
+    if selection.get("split") != "validation" or selection.get("metric") != "f1_score":
+        raise ValueError(
+            "Frozen parameters must be generated from validation F1 selection."
+        )
+    expected_algorithms = set(ALGORITHMS)
+    if set(selection.get("winners", {})) != expected_algorithms:
+        raise ValueError("Frozen configuration must record one winner per algorithm.")
     return config
 
 

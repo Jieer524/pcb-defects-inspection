@@ -285,20 +285,23 @@ The four raw algorithms share the unified denoising + CLAHE preprocessing define
 `configs/frozen_parameters.yaml` (`preprocessing:` section), applied identically to
 every algorithm so the comparison stays fair. Automatic resizing, morphology,
 contour filtering, box merging, and non-maximum suppression remain disabled.
-ORB additionally applies optional spatial calibration (`calibrate: true`), a
-KNN + Lowe-ratio test plus RANSAC homography (`warpPerspective` alignment) before
-defect detection; this is an ORB-internal step, not shared preprocessing.
+ORB calibration is not part of the validation-selected enhanced pipeline and is
+disabled in the canonical final-test configuration.
 Development uses 139 images, parameter selection uses the separate 139-image
 validation split, and the 415-image test split is reserved for the final run.
 
 | Algorithm | Development | Validation-selected frozen settings |
 |---|---:|---|
-| Otsu | Complete | Automatic Otsu threshold; no tunable decision threshold |
-| Canny | Complete | low/high 50/150, aperture 3, L2 gradient off |
-| Template Matching | Complete | TM_CCOEFF_NORMED, block 64x64, step 32, threshold 0.60 |
-| ORB | Complete | BF cross-check, spatial 15, Hamming 60, box radius 35, KNN+Lowe ratio 0.75, RANSAC reprojection 5.0, calibrate=true |
+| Otsu | Complete | median blur 3, dilation 35, minimum area 150 |
+| Canny | Complete | low/high 50/150, closing 5, minimum area 300 |
+| Template Matching | Complete | TM_CCOEFF_NORMED, block 32x32, step 16, threshold 0.65 |
+| ORB | Complete | BF cross-check, spatial 15, Hamming 40, radius 20, merge enabled, minimum area 300, calibration off |
 
-The authoritative combined configuration is `configs/frozen_parameters.yaml`.
+The predetermined shared preprocessing is stored in
+`configs/validation_protocol.yaml`. The validation runner selects the highest-F1
+candidate for each algorithm and generates the sole authoritative final-test
+configuration, `configs/frozen_parameters.yaml`. Historical raw parameter records
+are retained under `configs/legacy_raw_validation/` and are not used for final testing.
 Development and validation work is shown in `notebooks/development/` (`02_otsu.ipynb`
 through `05_orb.ipynb`). Ablation studies are in `notebooks/validation/`. The final
 test benchmark and plots are in `notebooks/final_evaluation/06_final_evaluation.ipynb`.

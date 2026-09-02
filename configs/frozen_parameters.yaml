@@ -1,4 +1,4 @@
-# Frozen after development and validation. Do not edit in response to test results.
+# Generated from validation results. Do not edit using test results.
 preprocessing:
   enabled: true
   denoise_method: gaussian
@@ -6,32 +6,35 @@ preprocessing:
   contrast_enhancement: clahe
   clahe_clip_limit: 2.0
   clahe_tile_size: 8
-
 protocol:
   manifest: data/dataset_split.csv
   test_images: 415
-  iou_threshold: 0.50
-
-otsu:
-  method: THRESH_BINARY+THRESH_OTSU
-  blur_ksize: 3
-  morph_dilate: 35
-  min_area: 150.0
-
+  iou_threshold: 0.5
+selection:
+  split: validation
+  metric: f1_score
+  source: outputs/metrics/essential_validation_comparison.csv
+  winners:
+    canny:
+      combination_id: Canny-Best-Area300
+      f1_score: 0.05281828931809223
+    orb:
+      combination_id: ORB-Best-Area300
+      f1_score: 0.00607460643394935
+    otsu:
+      combination_id: Otsu-Best-Dilated-35
+      f1_score: 0.8396143733567046
+    template_matching:
+      combination_id: TM-Best-32x32-Thresh65
+      f1_score: 0.4502470007057163
 canny:
   low_threshold: 50
   high_threshold: 150
   aperture_size: 3
   l2_gradient: false
+  morph_dilate: 0
   morph_close: 5
   min_area: 300.0
-
-template_matching:
-  method: TM_CCOEFF_NORMED
-  block_size: [32, 32]
-  step_size: 16
-  corr_threshold: 0.65
-
 orb:
   n_features: 5000
   scale_factor: 1.2
@@ -40,8 +43,19 @@ orb:
   spatial_distance_threshold: 15.0
   hamming_threshold: 40.0
   box_radius: 20
-  calibrate: true
-  ratio_threshold: 0.75
-  ransac_reproj_threshold: 5.0
   merge_points: true
+  morph_dilate: 0
   min_area: 300.0
+otsu:
+  method: THRESH_BINARY+THRESH_OTSU
+  blur_ksize: 3
+  morph_open: 0
+  morph_dilate: 35
+  min_area: 150.0
+template_matching:
+  method: TM_CCOEFF_NORMED
+  block_size:
+  - 32
+  - 32
+  step_size: 16
+  corr_threshold: 0.65
