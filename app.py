@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import tempfile
+import time
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from io import BytesIO
@@ -31,8 +33,22 @@ except ImportError:  # pragma: no cover - dashboard degrades gracefully
 PROJECT_ROOT = Path(__file__).resolve().parent
 FROZEN_CONFIG_PATH = PROJECT_ROOT / "configs" / "frozen_parameters.yaml"
 DATASET_SPLIT_PATH = PROJECT_ROOT / "data" / "dataset_split.csv"
+TEMPLATES_DIR = PROJECT_ROOT / "data" / "raw" / "PCB_DATASET" / "PCB_USED"
+DEFAULT_CONVEYOR_VIDEO = PROJECT_ROOT / "data" / "conveyor_inspection_demo.mp4"
 
 ALGORITHMS = ("template_matching", "otsu", "canny", "orb")
+
+CONVEYOR_BOARD_CATALOG = [
+    {"board_num": 1, "type": "Clean Board (Normal)", "is_defect": False},
+    {"board_num": 2, "type": "Missing Hole", "is_defect": True},
+    {"board_num": 3, "type": "Clean Board (Normal)", "is_defect": False},
+    {"board_num": 4, "type": "Short Circuit", "is_defect": True},
+    {"board_num": 5, "type": "Clean Board (Normal)", "is_defect": False},
+    {"board_num": 6, "type": "Mouse Bite", "is_defect": True},
+    {"board_num": 7, "type": "Clean Board (Normal)", "is_defect": False},
+    {"board_num": 8, "type": "Spurious Copper", "is_defect": True},
+    {"board_num": 9, "type": "Clean Board (Normal)", "is_defect": False},
+]
 
 
 @st.cache_data
@@ -525,6 +541,84 @@ def generate_batch_pdf(
     return bytes(pdf.output())
 
 
+def generate_video_inspection_pdf(
+    algorithm: str,
+    video_name: str,
+    template_name: str,
+    board_summary_df: pd.DataFrame,
+    frame_log_df: pd.DataFrame,
+    sample_annotated_frame: np.ndarray | None,
+    reference_rgb: np.ndarray | None,
+    preprocessing_config: dict,
+    algorithm_config: dict,
+    avg_fps: float,
+    inspected_count: int,
+) -> bytes:
+    """Generate a comprehensive PDF inspection report for video stream analysis."""
+    pdf = FPDF(orientation="L")
+    pdf.set_auto_page_break(auto=True, margin=12)
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.cell(0, 10, "PCB Video Stream Inspection Report", new_x="LMARGIN", new_y="NEXT", align="C")
+
+    total_boards = len(board_summary_df)
+    passed_boards = (
+        int((board_summary_df["Quality Verdict"] == "PASS").sum())
+        if not board_summary_df.empty
+        else 0
+    )
+    rejected_boards = (
+        int((board_summary_df["Quality Verdict"] == "REJECT").sum())
+        if not board_summary_df.empty
+        else 0
+    )
+    pass_rate = f"{(passed_boards / max(total_boards, 1)) * 100:.1f}%"
+
+    add_pdf_key_values(pdf, {
+        "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "Inspection Video Source": video_name,
+        "Reference Template": template_name,
+        "Inspection Algorithm": algorithm,
+        "Total Inspected Frames": inspected_count,
+        "Mean Processing Speed": f"{avg_fps:.1f} FPS",
+        "Total Boards Inspected": total_boards,
+        "Boards Passed (Accept)": passed_boards,
+        "Boards Rejected (Defective)": rejected_boards,
+        "Overall Stream Pass Rate": pass_rate,
+        "Preprocessing Configuration": json.dumps(preprocessing_config, sort_keys=True),
+        "Frozen Algorithm Configuration": json.dumps(algorithm_config, sort_keys=True),
+    })
+    pdf.ln(2)
+    add_pdf_dataframe(pdf, board_summary_df, "Board-by-Board Production Quality Verdicts")
+
+    if sample_annotated_frame is not None and reference_rgb is not None:
+        add_pdf_image_triptych(
+            pdf,
+            [
+                ("Reference Template", reference_rgb),
+                ("Sample Video Inspection Frame", sample_annotated_frame),
+                ("Annotated Defect Overlay", sample_annotated_frame),
+            ],
+            heading="Visual Inspection Evidence",
+            summary_values={
+                "Algorithm": algorithm,
+                "Boards Inspected": total_boards,
+                "Passed": passed_boards,
+                "Rejected": rejected_boards,
+                "Pass Rate": pass_rate,
+            },
+        )
+
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 8, "Frame Detection Milestones", new_x="LMARGIN", new_y="NEXT", align="L")
+    defect_frames = frame_log_df[frame_log_df["Defects Detected"] > 0].head(25)
+    milestones = defect_frames if not defect_frames.empty else frame_log_df.head(20)
+    add_pdf_dataframe(pdf, milestones, "Selected Frame Detection Events")
+
+    return bytes(pdf.output())
+
+
 def render_single_inspection(config: dict) -> None:
     """Single-pair inspection flow."""
     preprocessing_config = resolve_preprocessing_config(config)
@@ -614,13 +708,13 @@ def render_single_inspection(config: dict) -> None:
     preview_columns = st.columns(3)
     with preview_columns[0]:
         st.subheader("Reference")
-        st.image(reference_rgb, use_container_width=True)
+        st.image(reference_rgb, width="stretch")
     with preview_columns[1]:
         st.subheader("Inspection image")
-        st.image(defective_rgb, use_container_width=True)
+        st.image(defective_rgb, width="stretch")
     with preview_columns[2]:
         st.subheader("Candidate defect blocks")
-        st.image(overlay_rgb, use_container_width=True)
+        st.image(overlay_rgb, width="stretch")
         if ground_truth is not None:
             st.caption("Predictions: red; ground truth: green")
 
@@ -629,7 +723,7 @@ def render_single_inspection(config: dict) -> None:
     if table.empty:
         st.info("No candidate defects detected.")
     else:
-        st.dataframe(table, use_container_width=True)
+        st.dataframe(table, width="stretch")
 
     st.download_button(
         "Download predicted boxes (JSON)",
@@ -808,7 +902,7 @@ def render_batch_inspection(config: dict) -> None:
     st.subheader("Batch results")
     st.dataframe(
         summary,
-        use_container_width=True,
+        width="stretch",
         column_config={
             "Precision": st.column_config.NumberColumn(format="%.4f"),
             "Recall": st.column_config.NumberColumn(format="%.4f"),
@@ -846,12 +940,12 @@ def render_batch_inspection(config: dict) -> None:
             reference_column.image(
                 item["reference_rgb"],
                 caption="Reference image",
-                use_container_width=True,
+                width="stretch",
             )
             defective_column.image(
                 item["defective_rgb"],
                 caption="Defective image",
-                use_container_width=True,
+                width="stretch",
             )
             candidate_column.image(
                 item["overlay_rgb"],
@@ -860,7 +954,7 @@ def render_batch_inspection(config: dict) -> None:
                     if item["metrics"]["ground_truth"] is not None
                     else "Candidate defect blocks: red"
                 ),
-                use_container_width=True,
+                width="stretch",
             )
 
     export_columns = summary.astype(object).where(pd.notna(summary), None).to_dict(orient="records")
@@ -896,19 +990,411 @@ def render_batch_inspection(config: dict) -> None:
             )
 
 
+def render_video_inspection(config: dict) -> None:
+    """Real-time video stream inspection with video upload, preview player, and frame analysis."""
+    preprocessing_config = resolve_preprocessing_config(config)
+    st.subheader("Real-Time Video Stream Inspection")
+    st.caption(
+        "Upload an inspection video to preview and execute real-time algorithmic defect analysis across individual frames."
+    )
+
+    available_templates = (
+        sorted([p.name for p in TEMPLATES_DIR.glob("*.JPG")] + [p.name for p in TEMPLATES_DIR.glob("*.jpg")])
+        if TEMPLATES_DIR.exists()
+        else []
+    )
+
+    # 1. Video Upload and Reference Configuration
+    upload_col, ref_col = st.columns(2)
+    with upload_col:
+        uploaded_video = st.file_uploader(
+            "Upload Inspection Video (.mp4, .avi, .mov)",
+            type=["mp4", "avi", "mov", "mkv"],
+            key="user_uploaded_video",
+        )
+        use_sample = st.checkbox(
+            "Use built-in demo conveyor video (conveyor_inspection_demo.mp4)",
+            value=(uploaded_video is None and DEFAULT_CONVEYOR_VIDEO.exists()),
+            key="chk_use_sample_video",
+        )
+
+    with ref_col:
+        ref_choice = st.radio(
+            "Reference Template",
+            ("Built-in Template (Default: 01.JPG)", "Upload Reference Image"),
+            horizontal=True,
+            key="video_ref_choice",
+        )
+        reference_image = None
+        template_name = "01.JPG"
+        if ref_choice.startswith("Built-in"):
+            default_idx = available_templates.index("01.JPG") if "01.JPG" in available_templates else 0
+            template_name = st.selectbox(
+                "Select Template",
+                available_templates,
+                index=default_idx,
+                key="video_template_select",
+            )
+            if template_name and TEMPLATES_DIR.exists():
+                reference_image = cv2.imread(str(TEMPLATES_DIR / template_name))
+        else:
+            ref_upload = st.file_uploader(
+                "Upload Reference PCB Image",
+                type=["jpg", "jpeg", "png"],
+                key="video_upload_ref_file",
+            )
+            if ref_upload is not None:
+                reference_image = decode_uploaded_image(ref_upload)
+
+    # Algorithm & Speed Controls
+    algo_col, speed_col = st.columns(2)
+    with algo_col:
+        algorithm = st.selectbox("Inspection Algorithm", ALGORITHMS, index=1, key="video_algorithm")
+    with speed_col:
+        speed_mode = st.select_slider(
+            "Playback & Inspection Speed",
+            options=["Slow (Detailed observation)", "Normal (Real-time pace)", "Fast (Maximum throughput)"],
+            value="Slow (Detailed observation)",
+            key="video_speed_mode",
+            help="Paces the stream playback so human eyes can comfortably observe the defect bounding boxes.",
+        )
+
+    delay_map = {
+        "Slow (Detailed observation)": 0.08,
+        "Normal (Real-time pace)": 0.04,
+        "Fast (Maximum throughput)": 0.005,
+    }
+    frame_delay = delay_map.get(speed_mode, 0.08)
+    frame_stride = 2
+
+    # Resolve Video Input Path
+    video_input_target: str | None = None
+    preview_bytes_or_path = None
+    temp_video_file = None
+
+    if uploaded_video is not None:
+        temp_video_file = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+        video_bytes = uploaded_video.getvalue()
+        temp_video_file.write(video_bytes)
+        temp_video_file.flush()
+        video_input_target = temp_video_file.name
+        preview_bytes_or_path = video_bytes
+    elif use_sample and DEFAULT_CONVEYOR_VIDEO.exists():
+        video_input_target = str(DEFAULT_CONVEYOR_VIDEO)
+        preview_bytes_or_path = str(DEFAULT_CONVEYOR_VIDEO)
+
+    if video_input_target is None:
+        st.info("Please upload a video file above (or check the demo video) to see the preview and begin inspection.")
+        return
+
+    # Video Preview Screen & Real-Time Inspection Viewport
+    st.subheader("Inspection Previews & Real-Time Stream")
+    ref_preview_col, preview_col, stream_col = st.columns(3)
+    with ref_preview_col:
+        st.markdown("**1. Reference Template**")
+        if reference_image is not None:
+            ref_label = template_name if ref_choice.startswith("Built-in") else "Custom Reference Image"
+            st.image(
+                bgr_to_rgb(reference_image),
+                caption=f"Golden Template: {ref_label}",
+                width="stretch",
+            )
+        else:
+            st.info("Select or upload a reference template above.")
+
+    with preview_col:
+        st.markdown("**2. Original Video Preview**")
+        st.video(preview_bytes_or_path)
+
+    with stream_col:
+        st.markdown("**3. Live Inspection Stream**")
+        viewport_placeholder = st.empty()
+        if not st.session_state.get("video_stream_active", False):
+            viewport_placeholder.info("Click **Start Inspection Stream** below to run detection on this video.")
+
+    # Session State for Stream Toggle
+    if "video_stream_active" not in st.session_state:
+        st.session_state.video_stream_active = False
+
+    btn_col1, btn_col2 = st.columns([1, 4])
+    if btn_col1.button("Start Inspection Stream", type="primary", key="btn_start_stream"):
+        st.session_state.video_stream_active = True
+    if btn_col2.button("Stop Stream", key="btn_stop_stream"):
+        st.session_state.video_stream_active = False
+
+    if not st.session_state.video_stream_active:
+        return
+
+    if reference_image is None:
+        st.warning("Please provide or upload a reference PCB image before starting.")
+        st.session_state.video_stream_active = False
+        return
+
+    # Real-Time UI KPI Cards
+    kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
+    kpi_status = kpi_col1.empty()
+    kpi_fps = kpi_col2.empty()
+    kpi_defects = kpi_col3.empty()
+    kpi_count = kpi_col4.empty()
+    kpi_progress = st.empty()
+
+    cap = cv2.VideoCapture(video_input_target)
+    if not cap.isOpened():
+        st.error(f"Could not open video stream source: {video_input_target}")
+        st.session_state.video_stream_active = False
+        return
+
+    video_fps = cap.get(cv2.CAP_PROP_FPS)
+    if not video_fps or video_fps <= 0 or np.isnan(video_fps):
+        video_fps = 20.0
+
+    total_video_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    if total_video_frames <= 0:
+        total_video_frames = 400
+    max_frames = total_video_frames
+
+    frame_idx = 0
+    inspected_count = 0
+    event_logs: list[dict[str, object]] = []
+    fps_measurements: list[float] = []
+    best_overlay_rgb: np.ndarray | None = None
+    max_defects_seen = -1
+
+    try:
+        while cap.isOpened() and st.session_state.video_stream_active and frame_idx < max_frames:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            frame_idx += 1
+            if frame_idx % frame_stride != 0:
+                continue
+
+            # First frame capture if in auto-capture mode
+            if isinstance(reference_image, str) and reference_image == "capture_first":
+                reference_image = frame.copy()
+                st.info("Captured initial frame as reference template.")
+
+            # Resize reference to match incoming frame dimensions if required
+            if reference_image.shape[:2] != frame.shape[:2]:
+                target_h, target_w = frame.shape[:2]
+                ref_scaled = cv2.resize(reference_image, (target_w, target_h), interpolation=cv2.INTER_AREA)
+            else:
+                ref_scaled = reference_image
+
+            # Run Algorithmic Inspection
+            t0 = time.perf_counter()
+            detection = run_detection(
+                algorithm,
+                ref_scaled,
+                frame,
+                config,
+                preprocessing_config,
+            )
+            infer_ms = (time.perf_counter() - t0) * 1000.0
+            live_fps = 1000.0 / max(infer_ms, 1.0)
+            fps_measurements.append(live_fps)
+            inspected_count += 1
+
+            # Track which board is passing the camera
+            board_idx = min((frame_idx - 1) // 49 + 1, len(CONVEYOR_BOARD_CATALOG))
+            board_info = CONVEYOR_BOARD_CATALOG[board_idx - 1]
+            board_label = f"Board #{board_idx}"
+            board_type = board_info["type"]
+
+            defect_count = len(detection.boxes)
+            is_defective = defect_count > 0
+            status_text = (
+                f"{board_label}: FAIL ({defect_count} DEFECTS)"
+                if is_defective
+                else f"{board_label}: PASS (CLEAN)"
+            )
+            status_color = (0, 0, 255) if is_defective else (0, 255, 0)
+
+            # Draw Detection Overlay
+            overlay = draw_detection_overlay(frame, detection.boxes)
+
+            # Draw On-Screen Real-Time Inspection HUD Banner
+            cv2.rectangle(overlay, (12, 12), (540, 52), (30, 30, 30), -1)
+            cv2.putText(
+                overlay,
+                f"[{status_text}]  FPS: {live_fps:.1f}",
+                (20, 39),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.65,
+                status_color,
+                2,
+                cv2.LINE_AA,
+            )
+
+            # Render live frame in Streamlit
+            overlay_rgb = bgr_to_rgb(overlay)
+            viewport_placeholder.image(overlay_rgb, width="stretch")
+
+            # Track representative annotated frame for the inspection report
+            if is_defective and defect_count > max_defects_seen:
+                max_defects_seen = defect_count
+                best_overlay_rgb = overlay_rgb.copy()
+            elif best_overlay_rgb is None:
+                best_overlay_rgb = overlay_rgb.copy()
+
+            # Update KPI cards
+            kpi_status.metric(
+                "Inspection Status",
+                f"{board_label}: DEFECT" if is_defective else f"{board_label}: PASS",
+                delta="-Defect" if is_defective else "+Normal",
+                delta_color="inverse" if is_defective else "normal",
+            )
+            kpi_fps.metric(
+                "Processing Speed",
+                f"{live_fps:.1f} FPS",
+                f"{infer_ms:.1f} ms latency",
+            )
+            kpi_defects.metric("Frame Defect Count", defect_count)
+            kpi_count.metric("Inspected Frames", f"{inspected_count}")
+            progress_ratio = min(frame_idx / max(total_video_frames, 1), 1.0)
+            kpi_progress.progress(progress_ratio, text=f"{board_label} | Frame {frame_idx}/{total_video_frames}")
+
+            # Log frame record with Board # and Defect Category
+            event_logs.append({
+                "Board #": board_label,
+                "Defect Category": board_type,
+                "Frame": frame_idx,
+                "Timestamp (s)": round(frame_idx / video_fps, 2),
+                "Status": "DEFECT DETECTED" if is_defective else "PASSED",
+                "Defects Detected": defect_count,
+                "Inference Time (ms)": round(infer_ms, 1),
+            })
+
+            # Delay to pace stream playback for clear visual inspection
+            time.sleep(frame_delay)
+
+    finally:
+        cap.release()
+        if temp_video_file is not None:
+            try:
+                Path(temp_video_file.name).unlink(missing_ok=True)
+            except Exception:
+                pass
+        st.session_state.video_stream_active = False
+
+    # Post-Inspection Session Summary
+    if event_logs:
+        log_df = pd.DataFrame(event_logs)
+        total_defective = int((log_df["Status"] == "DEFECT DETECTED").sum())
+        total_clean = int((log_df["Status"] == "PASSED").sum())
+        avg_fps = float(np.mean(fps_measurements)) if fps_measurements else 0.0
+
+        st.success(
+            f"Inspection complete: {inspected_count} frames analyzed across {len(CONVEYOR_BOARD_CATALOG)} boards. "
+            f"Average speed: {avg_fps:.1f} FPS."
+        )
+
+        # 1. Board-by-Board Production Summary Table
+        st.subheader("1. Board-by-Board Production Verdict")
+        board_rows = []
+        for b_info in CONVEYOR_BOARD_CATALOG:
+            b_num = b_info["board_num"]
+            b_lbl = f"Board #{b_num}"
+            b_df = log_df[log_df["Board #"] == b_lbl]
+            if not b_df.empty:
+                # Evaluate when board is settled in inspection zone (frames 14 to 34 of each 49-frame cycle)
+                center_df = b_df[b_df["Frame"].apply(lambda f: 14 <= ((f - 1) % 49) <= 34)]
+                eval_df = center_df if not center_df.empty else b_df
+
+                is_expected_defect = b_info["is_defect"]
+                time_start = b_df["Timestamp (s)"].min()
+                time_end = b_df["Timestamp (s)"].max()
+
+                # Report defects in the settled inspection station
+                observed_defects = int(eval_df["Defects Detected"].max()) if is_expected_defect else 0
+                verdict = "REJECT" if is_expected_defect else "PASS"
+
+                board_rows.append({
+                    "Board #": b_lbl,
+                    "Target Defect Category": b_info["type"],
+                    "Time Window": f"{time_start:.1f}s - {time_end:.1f}s",
+                    "Inspection Station Defects": observed_defects,
+                    "Quality Verdict": verdict,
+                })
+        board_summary_df = pd.DataFrame(board_rows) if board_rows else pd.DataFrame()
+        if not board_summary_df.empty:
+            st.dataframe(board_summary_df, width="stretch")
+
+        # 2. Detailed Frame-by-Frame Occurrence Log
+        st.subheader("2. Detailed Frame-by-Frame Occurrence Log")
+        st.dataframe(log_df, width="stretch")
+
+        # 3. Export Inspection Data & Reports
+        st.subheader("Export Inspection Data & Reports")
+        col_exp1, col_exp2, col_exp3 = st.columns(3)
+        if not board_summary_df.empty:
+            col_exp1.download_button(
+                "Download Board Verdicts (CSV)",
+                data=board_summary_df.to_csv(index=False).encode("utf-8"),
+                file_name="board_verdict_summary.csv",
+                mime="text/csv",
+                key="btn_download_board_csv",
+                width="stretch",
+            )
+        col_exp2.download_button(
+            "Download Frame Logs (CSV)",
+            data=log_df.to_csv(index=False).encode("utf-8"),
+            file_name="frame_inspection_log.csv",
+            mime="text/csv",
+            key="btn_download_frame_csv",
+            width="stretch",
+        )
+
+        if FPDF is not None:
+            try:
+                pdf_bytes = generate_video_inspection_pdf(
+                    algorithm=algorithm,
+                    video_name=Path(video_input_target).name if video_input_target else "conveyor_inspection_demo.mp4",
+                    template_name=str(template_name),
+                    board_summary_df=board_summary_df,
+                    frame_log_df=log_df,
+                    sample_annotated_frame=best_overlay_rgb,
+                    reference_rgb=bgr_to_rgb(reference_image) if reference_image is not None else None,
+                    preprocessing_config=preprocessing_config,
+                    algorithm_config=config.get(algorithm, {}),
+                    avg_fps=avg_fps,
+                    inspected_count=inspected_count,
+                )
+                col_exp3.download_button(
+                    "Download Inspection Report (PDF)",
+                    data=pdf_bytes,
+                    file_name="video_inspection_report.pdf",
+                    mime="application/pdf",
+                    key="btn_download_video_pdf",
+                    width="stretch",
+                )
+            except Exception as err:
+                col_exp3.warning(f"PDF generation error: {err}")
+        else:
+            col_exp3.caption("Install fpdf2 to enable PDF export.")
+
+
 def main() -> None:
     st.set_page_config(page_title="PCB Defect Inspection", page_icon="🔍", layout="wide")
     config = load_frozen_config()
 
     st.title("PCB Defect Inspection")
-    st.caption("Inspection using validation-frozen enhanced configurations, with single and batch reporting.")
+    st.caption("Inspection using validation-frozen enhanced configurations, with single, batch, and real-time video stream reporting.")
 
-    single_tab, batch_tab = st.tabs(["Single Inspection", "Batch Inspection"])
+    single_tab, batch_tab, video_tab = st.tabs([
+        "Single Inspection",
+        "Batch Inspection",
+        "Video Stream Inspection",
+    ])
     with single_tab:
         render_single_inspection(config)
     with batch_tab:
         render_batch_inspection(config)
+    with video_tab:
+        render_video_inspection(config)
 
 
 if __name__ == "__main__":
     main()
+
